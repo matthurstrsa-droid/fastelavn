@@ -29,38 +29,40 @@ except Exception as e:
     st.stop()
 
 # --- 3. SIDEBAR: RATING FUNCTION ---
+# --- 3. SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
     st.header("⭐ Rate a Bakery")
+    
+    # This defines the dropdown and the slider
     bakery_choice = st.selectbox("Which bakery did you visit?", df['Bakery Name'].unique())
     user_score = st.slider("Your Rating", 1.0, 10.0, 8.0, step=0.5)
     
-    # Use a specific key for the button to prevent state confusion
+    # --- THIS IS THE SUBMIT RATING BLOCK ---
     if st.button("Submit Rating", key="submit_btn"):
         bakery_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
         
-        # Prepare row
+        # We create the new row to be added
         new_row = pd.DataFrame([{
             "Bakery Name": bakery_choice,
             "Rating": user_score,
             "lat": bakery_info['lat'],
             "lon": bakery_info['lon']
-            # Add other columns if needed
         }])
         
         try:
+            # We combine the existing data with the new row
             updated_df = pd.concat([df, new_row], ignore_index=True)
+            
+            # This is where the magic happens - writing to Google Sheets
             conn.update(spreadsheet=sheet_id, data=updated_df)
             
-            # Show success and then clear the state
-            st.success("Saved! Refreshing leaderboard...")
-            
-            # This is the important part: 
-            # It only triggers AFTER a successful save
+            st.success("Saved! Refreshing...")
             st.cache_data.clear() 
             st.rerun()
             
         except Exception as e:
             st.error(f"Error saving: {e}")
+    # --- END OF THE BLOCK ---
             
 # --- 4. MAIN INTERFACE ---
 avg_ratings = df.groupby('Bakery Name')['Rating'].mean().reset_index()
@@ -84,6 +86,7 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
 
 
 
