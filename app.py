@@ -19,13 +19,17 @@ try:
     sh = gc.open_by_key(sheet_id)
     worksheet = sh.get_worksheet(0) # Opens the first tab
     
-    # Load data into DataFrame
+   # Load data into DataFrame
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
-except Exception as e:
-    st.error(f"Login Failed: {e}")
-    st.stop()
 
+    # --- NEW: CLEAN THE DATA ---
+    # 1. Convert lat/lon to numbers (in case Google sent them as strings)
+    df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+    df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
+
+    # 2. Drop any rows that are missing coordinates
+    df = df.dropna(subset=['lat', 'lon'])
 # --- 2. APP INTERFACE ---
 st.title("🥐 The Final Bakery Critic")
 
@@ -51,3 +55,4 @@ for _, row in df.iterrows():
     folium.Marker([row['lat'], row['lon']], popup=row['Bakery Name']).add_to(m)
 
 st_folium(m, width=700)
+
