@@ -9,7 +9,7 @@ st.set_page_config(page_title="Bakery Critic", layout="wide")
 st.title("🥐 The Community Fastelavnsbolle Critic")
 
 # Use the name that matches your secrets header: [connections.my_bakery_db]
-conn = st.connection("my_bakery_db", type=GSheetsConnection)
+conn = st.connection("bakery_final_fix", type=GSheetsConnection)
 sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
 
 # --- 2. DATA LOADING ---
@@ -93,4 +93,5 @@ with col2:
     # Show top 10 bakeries sorted by rating
     leaderboard = df.sort_values(by="Rating", ascending=False).head(10)
     st.table(leaderboard[['Bakery Name', 'Rating']])
+
 
