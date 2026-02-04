@@ -45,7 +45,6 @@ except Exception as e:
     st.stop()
 
 # --- 3. SIDEBAR: RATING FUNCTION ---
-# --- 3. SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
     st.header("⭐ Rate a Bakery")
     
@@ -66,11 +65,14 @@ with st.sidebar:
         }])
         
         try:
-            # We combine the existing data with the new row
+            # Combine existing data with new row
             updated_df = pd.concat([df, new_row], ignore_index=True)
             
-            # This is where the magic happens - writing to Google Sheets
-            conn.update(spreadsheet=sheet_id, data=updated_df)
+            # Use the new connection name to save
+            conn.update(
+                spreadsheet=sheet_id, 
+                data=updated_df
+            )
             
             st.success("Saved! Refreshing...")
             st.cache_data.clear() 
@@ -102,6 +104,7 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
 
 
 
