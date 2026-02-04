@@ -86,7 +86,7 @@ with st.sidebar:
         address = st.text_input("Address")
         neighborhood_input = st.selectbox("Neighborhood", ["Vesterbro", "Nørrebro", "Østerbro", "Indre By", "Other"])
     else:
-        # SYNC LOGIC: If clicked_bakery exists, we use it as the default index
+        # 1. Sync Bakery with Map Click
         bakery_options = sorted(df['Bakery Name'].unique())
         default_idx = 0
         if clicked_bakery in bakery_options:
@@ -94,31 +94,26 @@ with st.sidebar:
             
         bakery_name = st.selectbox("Which bakery?", bakery_options, index=default_idx)
         
-        existing_flavs = df[df['Bakery Name'] == bakery_name]['Fastelavnsbolle Type'].unique().tolist()
-        flavor_selection = st.selectbox("Which flavour?", existing_flavs + ["➕ Add new flavour..."])
-        flavor_name = st.text_input("New flavour name:") if flavor_selection == "➕ Add new flavour..." else flavor_selection
+        # 2. Get flavors for THIS bakery
+        existing_flavs = sorted(df[df['Bakery Name'] == bakery_name]['Fastelavnsbolle Type'].unique().tolist())
+        existing_flavs = [f for f in existing_flavs if f] # Remove blanks
         
-        # Pull existing data for hidden fields
-        b_info = df[df['Bakery Name'] == bakery_name].iloc[0]
-        submit_lat, submit_lon = b_info['lat'], b_info['lon']
-        address = b_info.get('Address', '')
-        neighborhood_input = b_info.get('Neighborhood', '')
-
-    user_score = st.slider("Rating", 1.0, 5.0, 3.0, step=0.25)
-    photo_link = st.text_input("Photo URL")
-
-    if st.button("Submit Rating"):
-        try:
-            if is_new_bakery:
-                location = geolocator.geocode(address)
-                submit_lat, submit_lon = location.latitude, location.longitude
-
-            new_row = [bakery_name, flavor_name, "", address, float(submit_lat), float(submit_lon), "", neighborhood_input, "App User", user_score, photo_link]
-            worksheet.append_row(new_row)
-            st.success("Saved!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error: {e}")
+        # 3. Add the "Add New" option
+        flavor_options = existing_flavs + ["➕ Add new flavour..."]
+        
+        # --- THE FIX ---
+        # We add a unique key based on the bakery name. 
+        # When bakery_name changes, this widget 'resets'.
+        flavor_selection = st.selectbox(
+            "Which flavour?", 
+            flavor_options, 
+            key=f"flavor_sel_{bakery_name}" 
+        )
+        
+        if flavor_selection == "➕ Add new flavour...":
+            flavor_name = st.text_input("Type the new flavour name:", key=f"new_flavor_{bakery_name}")
+        else:
+            flavor_name = flavor_selection
 
 # --- 4. RANKINGS (Tab 2) ---
 with tab2:
@@ -130,4 +125,5 @@ with tab2:
         st.subheader("Top Flavours")
         st.dataframe(display_df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index().sort_values('mean', ascending=False), hide_index=True)
         
+
 
