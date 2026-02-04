@@ -8,7 +8,7 @@ from geopy.geocoders import Nominatim
 
 # --- 1. CONFIG & AUTH ---
 st.set_page_config(page_title="Bakery Critic", layout="wide")
-geolocator = Nominatim(user_agent="bakery_explorer_v3")
+geolocator = Nominatim(user_agent="bakery_explorer_v4")
 
 try:
     scope = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -31,99 +31,57 @@ except Exception as e:
     st.error(f"Auth/Data Error: {e}")
     st.stop()
 
-# --- 2. THE MAP (Moved up so we can capture clicks) ---
-st.title("🥐 Copenhagen Fastelavnsbolle 2026")
+# --- 2. PROGRESS LOGIC ---
+# A bakery is "Tried" if it has a numeric rating
+tried_bakeries = df[df['Rating'] > 0]['Bakery Name'].unique().tolist()
 
-all_neighborhoods = ["All"] + sorted([n for n in df['Neighborhood'].unique() if n])
-selected_n = st.selectbox("📍 Filter by Neighborhood", all_neighborhoods)
-display_df = df if selected_n == "All" else df[df['Neighborhood'] == selected_n]
-
-tab1, tab2 = st.tabs(["📍 Map View", "🏆 Leaderboards"])
-
-# We initialize a variable to hold the clicked bakery name
-clicked_bakery = None
-
-with tab1:
-    m = folium.Map(location=[55.6761, 12.5683], zoom_start=13)
-    
-    for _, row in display_df.iterrows():
-        photo_val = row.get('PhotoURL', '')
-        img_tag = f'<img src="{photo_val}" width="180px" style="border-radius:8px; margin-top:5px;">' if photo_val else ""
-        
-        popup_content = f"""
-        <div style="font-family: Arial; min-width: 150px;">
-            <b>{row['Bakery Name']}</b><br>
-            {row['Fastelavnsbolle Type']}<br>
-            Score: {row['Rating']}/10<br>
-            {img_tag}
-            <p style='color:blue;'>Click marker to select for rating!</p>
-        </div>
-        """
-        
-        folium.Marker(
-            location=[row['lat'], row['lon']], 
-            popup=folium.Popup(popup_content, max_width=200),
-            tooltip=row['Bakery Name']
-        ).add_to(m)
-    
-    # --- CAPTURE CLICK DATA ---
-    map_data = st_folium(m, width=1000, height=500, key="main_map")
-    
-    # If a user clicks a marker, get the name from the tooltip
-    if map_data.get("last_object_clicked_tooltip"):
-        clicked_bakery = map_data["last_object_clicked_tooltip"]
-        st.info(f"Selected: **{clicked_bakery}**. Use the sidebar to add your rating!")
-
-# --- 3. SIDEBAR: SUBMIT RATING ---
+# --- 3. SIDEBAR: PROGRESS & SUBMISSION ---
 with st.sidebar:
+    st.header("📊 Your Progress")
+    total_spots = len(df['Bakery Name'].unique())
+    visited_spots = len(tried_bakeries)
+    st.write(f"Conquered: {visited_spots} / {total_spots}")
+    st.progress(visited_spots / total_spots if total_spots > 0 else 0)
+    
+    st.divider()
     st.header("⭐ Rate or Add")
     
-    is_new_bakery = st.checkbox("Bakery not on the map?")
+    is_new_bakery = st.checkbox("New Bakery?")
     
+    # Capture map clicks for auto-selection
+    clicked_bakery = st.session_state.get("clicked_bakery", None)
+
     if is_new_bakery:
-        bakery_name = st.text_input("New Bakery Name")
-        flavor_name = st.text_input("What flavor?")
-        address = st.text_input("Address")
-        neighborhood_input = st.selectbox("Neighborhood", ["Vesterbro", "Nørrebro", "Østerbro", "Indre By", "Other"])
+        bakery_name = st.text_input("Bakery Name")
+        flavor_name = st.text_input("Flavor Name")
+        address = st.text_input("Address (incl. Copenhagen)")
+        neighborhood_input = st.selectbox("Neighborhood", ["Vesterbro", "Nørrebro", "Østerbro", "Indre By", "Frederiksberg", "Amager", "Other"])
     else:
-        # 1. Sync Bakery with Map Click
         bakery_options = sorted(df['Bakery Name'].unique())
-        default_idx = 0
-        if clicked_bakery in bakery_options:
-            default_idx = bakery_options.index(clicked_bakery)
-            
+        default_idx = bakery_options.index(clicked_bakery) if clicked_bakery in bakery_options else 0
         bakery_name = st.selectbox("Which bakery?", bakery_options, index=default_idx)
         
-        # 2. Get flavors for THIS bakery
         existing_flavs = sorted(df[df['Bakery Name'] == bakery_name]['Fastelavnsbolle Type'].unique().tolist())
-        existing_flavs = [f for f in existing_flavs if f] # Remove blanks
+        flavor_selection = st.selectbox("Which flavour?", [f for f in existing_flavs if f] + ["➕ Add new..."], key=f"flav_{bakery_name}")
+        flavor_name = st.text_input("Flavor name:") if flavor_selection == "➕ Add new..." else flavor_selection
         
-        # 3. Add the "Add New" option
-        flavor_options = existing_flavs + ["➕ Add new flavour..."]
-        
-        # --- THE FIX ---
-        # We add a unique key based on the bakery name. 
-        # When bakery_name changes, this widget 'resets'.
-        flavor_selection = st.selectbox(
-            "Which flavour?", 
-            flavor_options, 
-            key=f"flavor_sel_{bakery_name}" 
-        )
-        
-        if flavor_selection == "➕ Add new flavour...":
-            flavor_name = st.text_input("Type the new flavour name:", key=f"new_flavor_{bakery_name}")
-        else:
-            flavor_name = flavor_selection
+        b_info = df[df['Bakery Name'] == bakery_name].iloc[0]
+        final_lat, final_lon = b_info['lat'], b_info['lon']
+        address, neighborhood_input = b_info.get('Address', ''), b_info.get('Neighborhood', '')
 
-# --- 4. RANKINGS (Tab 2) ---
-with tab2:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Top Bakeries")
-        st.dataframe(display_df.groupby('Bakery Name')['Rating'].agg(['mean', 'count']).reset_index().sort_values('mean', ascending=False), hide_index=True)
-    with col2:
-        st.subheader("Top Flavours")
-        st.dataframe(display_df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index().sort_values('mean', ascending=False), hide_index=True)
-        
+    user_score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
+    is_wishlist = st.checkbox("Add to Wishlist? ❤️")
+    photo_link = st.text_input("Photo URL")
 
-
+    if st.button("Submit"):
+        try:
+            if is_new_bakery:
+                location = geolocator.geocode(address)
+                if location:
+                    final_lat, final_lon = location.latitude, location.longitude
+                else:
+                    st.error("Address error")
+                    st.stop()
+            
+            # Using '99' as a placeholder rating for wishlist items
+            submit_score = 0.1 if is_wishlist and user_score == 8.0
