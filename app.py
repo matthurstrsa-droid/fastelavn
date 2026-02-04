@@ -88,7 +88,7 @@ with st.sidebar:
         mode = st.radio("Action:", ["Rate it", "Add to Wishlist"], index=1 if is_wish else 0, key=f"mode_{chosen}")
         
         if mode == "Rate it":
-            score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
+            score = st.slider("Rating", 1.0, 5.0, 3.0, step=0.25)
             if st.button("Submit Rating ✅"):
                 b_data = b_rows.iloc[0]
                 new_row = [str(chosen), str(f_name), "", str(b_data['Address']), float(b_data['lat']), float(b_data['lon']), "", str(b_data['Neighborhood']), "User", float(score), ""]
@@ -126,3 +126,4 @@ with t2:
     st.subheader("Bakery Status Overview")
     list_data = [{"Status": ("✅ Tried" if bakery_status.get(n,0) >= 1.0 else "❤️ Wishlist" if 0.01 < bakery_status.get(n,0) < 0.2 else "⭕ To Visit"), "Bakery": n} for n in sorted(df_clean['Bakery Name'].unique())]
     st.dataframe(pd.DataFrame(list_data), use_container_width=True, hide_index=True)
+
