@@ -1,5 +1,7 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import folium
+from streamlit_folium import st_folium
 
 # This tells the app to use the secrets we just flattened out
 conn = st.connection("my_bakery_db", type=GSheetsConnection)
@@ -100,6 +102,7 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
 
 
 
