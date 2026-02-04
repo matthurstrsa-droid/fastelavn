@@ -1,8 +1,11 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import folium
-from streamlit_folium import st_folium
+
+# --- FORCE NEW CONNECTION NAME ---
+# We change "gsheets" to "my_bakery_db" to clear any bad cache
+conn = st.connection("my_bakery_db", type=GSheetsConnection)
+sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
 
 # --- 1. PAGE SETUP ---
 st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
@@ -86,6 +89,7 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
 
 
 
