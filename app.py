@@ -1,4 +1,8 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+
+# This tells the app to use the secrets we just flattened out
+conn = st.connection("my_bakery_db", type=GSheetsConnection)
 
 # DEBUG CHECK
 st.write("Does the app see the secret?", "my_bakery_db" in st.secrets.get("connections", {}))
@@ -96,6 +100,7 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
 
 
 
