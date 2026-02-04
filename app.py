@@ -10,7 +10,7 @@ st.title("🥐 The Community Fastelavnsbolle Critic")
 
 # --- 1. CONNECT TO YOUR GOOGLE SHEET ---
 # We pass the spreadsheet ID directly here to force the connection to use secrets
-conn = st.connection("gsheets", type=GSheetsConnection, spreadsheet="https://docs.google.com/spreadsheets/d/1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo/edit?gid=91624038#gid=91624038")
+conn = st.connection("gsheets", type=GSheetsConnection, spreadsheet="1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo/edit?gid=91624038#gid=91624038")
 
 # Now read without passing the ID again
 df = conn.read(ttl="0m")
@@ -77,6 +77,7 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
 
