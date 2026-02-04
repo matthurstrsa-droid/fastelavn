@@ -17,7 +17,7 @@ df = conn.read(ttl="0m")
 
 # Load the data
 sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
-df = conn.read(spreadsheet=sheet_id, worksheet="Sheet1", ttl="0m")
+df = conn.read(spreadsheet=sheet_id, worksheet="Fastelavnsbolle Guide", ttl="0m")
 
 # --- SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
@@ -77,6 +77,7 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
 
