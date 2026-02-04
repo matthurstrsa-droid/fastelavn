@@ -14,13 +14,18 @@ sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
 
 # --- 2. DATA LOADING ---
 try:
-    # Read the data (ttl=0 ensures we always see the latest ratings)
+    # ttl=0 is vital here to bypass the "Response 200" ghost cache
     df = conn.read(spreadsheet=sheet_id, ttl=0)
     
-    # Clean data: Remove any rows where Lat or Lon might be missing
+    # If df is somehow not a dataframe, force it to be one or show error
+    if not isinstance(df, pd.DataFrame):
+        st.error("Google sent a webpage instead of data. Try: Share -> Add Service Account as Editor.")
+        st.stop()
+
     df = df.dropna(subset=['lat', 'lon'])
 except Exception as e:
-    st.error(f"Could not connect to Google Sheets: {e}")
+    st.error(f"Connection Error: {e}")
+    st.info("Check that 'General Access' is Restricted and the Service Account is an Editor.")
     st.stop()
 
 # --- 3. SIDEBAR: RATING FORM ---
@@ -88,3 +93,4 @@ with col2:
     # Show top 10 bakeries sorted by rating
     leaderboard = df.sort_values(by="Rating", ascending=False).head(10)
     st.table(leaderboard[['Bakery Name', 'Rating']])
+
