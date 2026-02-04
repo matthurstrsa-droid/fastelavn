@@ -1,62 +1,44 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import pandas as pd
 import folium
 from streamlit_folium import st_folium
 
-# This tells the app to use the secrets we just flattened out
-conn = st.connection("my_bakery_db", type=GSheetsConnection)
-
-# DEBUG CHECK
-st.write("Does the app see the secret?", "my_bakery_db" in st.secrets.get("connections", {}))
-if "connections" in st.secrets and "my_bakery_db" in st.secrets["connections"]:
-    st.write("Is the email correct?", st.secrets["connections"]["my_bakery_db"].get("client_email"))
-
-import streamlit as st
-from streamlit_gsheets import GSheetsConnection
-import pandas as pd
-
-# --- FORCE NEW CONNECTION NAME ---
-# We change "gsheets" to "my_bakery_db" to clear any bad cache
-conn = st.connection("my_bakery_db", type=GSheetsConnection)
-sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
-
-# --- 1. PAGE SETUP ---
-st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Bakery Critic", layout="wide")
 st.title("🥐 The Community Fastelavnsbolle Critic")
 
-# --- 2. THE CONNECTION ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Use the name that matches your secrets header: [connections.my_bakery_db]
+conn = st.connection("my_bakery_db", type=GSheetsConnection)
 sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
 
+# --- 2. DATA LOADING ---
 try:
-    # Load and clean data
-    df = conn.read(spreadsheet=sheet_id, ttl="1m")
-    df.columns = df.columns.str.strip()
+    # Read the data (ttl=0 ensures we always see the latest ratings)
+    df = conn.read(spreadsheet=sheet_id, ttl=0)
     
-    # --- ADD THIS LINE HERE ---
-    df = df.dropna(subset=['Bakery Name']) 
-    # --------------------------
-
-    # Ensure required columns exist
-    required = ['Bakery Name', 'Rating', 'lat', 'lon']
-    # ... rest of your code
+    # Clean data: Remove any rows where Lat or Lon might be missing
+    df = df.dropna(subset=['lat', 'lon'])
 except Exception as e:
-    st.error(f"Authentication Failed: {e}")
+    st.error(f"Could not connect to Google Sheets: {e}")
     st.stop()
 
-# --- 3. SIDEBAR: RATING FUNCTION ---
+# --- 3. SIDEBAR: RATING FORM ---
 with st.sidebar:
     st.header("⭐ Rate a Bakery")
     
-    # This defines the dropdown and the slider
-    bakery_choice = st.selectbox("Which bakery did you visit?", df['Bakery Name'].unique())
+    # Dropdown of bakeries from your sheet
+    bakery_list = df['Bakery Name'].unique()
+    bakery_choice = st.selectbox("Which bakery did you visit?", bakery_list)
+    
+    # User selects a rating
     user_score = st.slider("Your Rating", 1.0, 10.0, 8.0, step=0.5)
     
-    # --- THIS IS THE SUBMIT RATING BLOCK ---
     if st.button("Submit Rating", key="submit_btn"):
+        # Get the lat/lon of the chosen bakery to keep the data consistent
         bakery_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
         
-        # We create the new row to be added
+        # Create a new row
         new_row = pd.DataFrame([{
             "Bakery Name": bakery_choice,
             "Rating": user_score,
@@ -65,52 +47,44 @@ with st.sidebar:
         }])
         
         try:
-            # Combine existing data with new row
+            # Append new row to existing data
             updated_df = pd.concat([df, new_row], ignore_index=True)
             
-            # Use the new connection name to save
-            conn.update(
-                spreadsheet=sheet_id, 
-                data=updated_df
-            )
+            # Write back to Google Sheets
+            conn.update(spreadsheet=sheet_id, data=updated_df)
             
-            st.success("Saved! Refreshing...")
-            st.cache_data.clear() 
+            st.success(f"Rating for {bakery_choice} saved!")
+            st.balloons()
+            
+            # Clear cache and refresh app to show new data
+            st.cache_data.clear()
             st.rerun()
             
         except Exception as e:
-            st.error(f"Error saving: {e}")
-    # --- END OF THE BLOCK ---
-            
-# --- 4. MAIN INTERFACE ---
-avg_ratings = df.groupby('Bakery Name')['Rating'].mean().reset_index()
-col_map, col_list = st.columns([2, 1])
+            st.error(f"Error saving to sheet: {e}")
+            st.info("Check that your Service Account email is an 'Editor' on the Google Sheet.")
 
-with col_map:
-    st.subheader("📍 Bakery Map")
+# --- 4. MAIN INTERFACE: MAP & LEADERBOARD ---
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("Bakery Map")
+    # Initialize Map
     m = folium.Map(location=[55.6761, 12.5683], zoom_start=12)
-    map_data = df.drop_duplicates(subset=['Bakery Name'])
     
-    for _, row in map_data.iterrows():
-        score = avg_ratings[avg_ratings['Bakery Name'] == row['Bakery Name']]['Rating'].values[0]
+    # Add markers for every bakery in the sheet
+    for index, row in df.iterrows():
         folium.Marker(
             [row['lat'], row['lon']],
-            popup=f"<b>{row['Bakery Name']}</b><br>Rating: {score:.1f}",
+            popup=f"{row['Bakery Name']}: {row['Rating']}/10",
             tooltip=row['Bakery Name']
         ).add_to(m)
-    st_folium(m, width="100%", height=500)
+    
+    # Display the map
+    st_folium(m, width=700, height=500, returned_objects=[])
 
-with col_list:
-    st.subheader("🏆 Top Rated")
-    top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
-    st.dataframe(top_buns, hide_index=True, use_container_width=True)
-
-
-
-
-
-
-
-
-
-
+with col2:
+    st.subheader("Top Rated")
+    # Show top 10 bakeries sorted by rating
+    leaderboard = df.sort_values(by="Rating", ascending=False).head(10)
+    st.table(leaderboard[['Bakery Name', 'Rating']])
