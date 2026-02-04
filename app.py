@@ -61,7 +61,7 @@ with st.sidebar:
         submit_lat, submit_lon, address = b_info['lat'], b_info['lon'], b_info.get('Address', '')
         neighborhood_input = b_info.get('Neighborhood', '')
 
-    user_score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
+    user_score = st.slider("Rating", 1.0, 5.0, 3.0, step=0.25)
     photo_link = st.text_input("Photo Link (Optional)")
 
     if st.button("Submit to Google Sheets"):
@@ -121,3 +121,4 @@ with tab2:
         f_stats = display_df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index()
         f_stats.columns = ['Flavour', 'Bakery', 'Avg Rating', 'Reviews']
         st.dataframe(f_stats.sort_values('Avg Rating', ascending=False), hide_index=True, use_container_width=True)
+
