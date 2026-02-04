@@ -17,16 +17,13 @@ try:
     df = conn.read(spreadsheet=sheet_id, ttl="0m")
     df.columns = df.columns.str.strip()
     
+    # --- ADD THIS LINE HERE ---
+    df = df.dropna(subset=['Bakery Name']) 
+    # --------------------------
+
     # Ensure required columns exist
     required = ['Bakery Name', 'Rating', 'lat', 'lon']
-    for col in required:
-        if col not in df.columns:
-            st.error(f"Missing column: {col}")
-            st.stop()
-            
-except Exception as e:
-    st.error("Authentication Failed. Check your Secrets and Sheet Permissions.")
-    st.stop()
+    # ... rest of your code
 
 # --- 3. SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
@@ -84,3 +81,4 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
