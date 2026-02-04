@@ -71,7 +71,7 @@ with st.sidebar:
                 try:
                     photo_url = ""
                     # UPLOAD TO DRIVE LOGIC
-                        if uploaded_file:
+         if uploaded_file:
                             file_metadata = {
                                 'name': f"{bakery_choice}_{final_flavor}.jpg",
                                 'parents': [FOLDER_ID]
@@ -114,4 +114,5 @@ with tab2:
         flavor_stats = df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index()
         flavor_stats.columns = ['Flavour', 'Bakery', 'Avg Rating', 'Reviews']
         st.dataframe(flavor_stats.sort_values(by="Avg Rating", ascending=False), hide_index=True, use_container_width=True)
+
 
