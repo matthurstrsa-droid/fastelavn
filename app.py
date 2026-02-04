@@ -25,8 +25,6 @@ def get_worksheet():
 def load_bakery_df():
     ws = get_worksheet()
     df = pd.DataFrame(ws.get_all_records())
-    
-    # Ensure columns exist and are numeric
     cols = {'Rating': 0.0, 'Price': 0.0, 'lat': 0.0, 'lon': 0.0, 'Fastelavnsbolle Type': ""}
     for col, default in cols.items():
         if col not in df.columns: df[col] = default
@@ -38,60 +36,58 @@ df = load_bakery_df()
 df_clean = df.dropna(subset=['lat', 'lon']) if not df.empty else pd.DataFrame()
 
 # --- 2. CALCULATE AGGREGATES ---
-# We calculate both Average Rating/Price AND the Count of real ratings (>= 1.0)
+# Filter for bakeries with real ratings and real prices
+priced_rated = df_clean[(df_clean['Rating'] >= 1.0) & (df_clean['Price'] > 0)]
+
 stats = df_clean[df_clean['Rating'] >= 1.0].groupby('Bakery Name').agg({
     'Rating': ['mean', 'count'],
     'Price': 'mean'
 })
-
-# Flatten the multi-index columns for easier access
 stats.columns = ['Avg_Rating', 'Rating_Count', 'Avg_Price']
 
-# Best Value Logic
-stats['Value_Score'] = stats.apply(lambda x: x['Avg_Rating'] / x['Avg_Price'] if x['Avg_Price'] > 0 else 0, axis=1)
-best_value_bakery = stats['Value_Score'].idxmax() if not stats.empty else None
+# Best Value Logic: Highest (Rating / Price) where Price > 0
+# We calculate this specifically on bakeries that have price data
+value_stats = stats[stats['Avg_Price'] > 0].copy()
+if not value_stats.empty:
+    value_stats['Value_Score'] = value_stats['Avg_Rating'] / value_stats['Avg_Price']
+    best_value_bakery = value_stats['Value_Score'].idxmax()
+else:
+    best_value_bakery = None
 
-# Podium & Max Status
 top_3 = stats['Avg_Rating'].sort_values(ascending=False).head(3).index.tolist()
 bakery_max_rating = df_clean.groupby('Bakery Name')['Rating'].max().to_dict()
 
-# --- 3. SIDEBAR FILTERS ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.header("🥯 Control Panel")
     
-    with st.expander("🔍 Filter Ranked Bakeries", expanded=True):
+    with st.expander("🔍 Filters", expanded=True):
         max_p_data = int(df_clean['Price'].max()) if not df_clean.empty else 100
         price_range = st.slider("Price Range (DKK)", 0, max(100, max_p_data), (0, max(100, max_p_data)))
         min_r = st.slider("Min Rating", 1.0, 5.0, 1.0, step=0.25)
 
     def should_show(name):
-        # Always show unrated/wishlisted
-        if name not in stats.index:
-            return True
-        # Filter rated bakeries
-        avg_r = stats.loc[name, 'Avg_Rating']
-        avg_p = stats.loc[name, 'Avg_Price']
-        return (avg_r >= min_r) and (price_range[0] <= avg_p <= price_range[1])
+        if name not in stats.index: return True
+        avg_r, avg_p = stats.loc[name, 'Avg_Rating'], stats.loc[name, 'Avg_Price']
+        # If price is 0 (missing), we don't filter it out by price range
+        price_ok = (price_range[0] <= avg_p <= price_range[1]) if avg_p > 0 else True
+        return (avg_r >= min_r) and price_ok
 
     visible_names = [name for name in df_clean['Bakery Name'].unique() if should_show(name)]
     display_df = df_clean[df_clean['Bakery Name'].isin(visible_names)]
 
     st.divider()
-    
-    # --- ACTIONS ---
     all_names = sorted(df_clean['Bakery Name'].unique().tolist())
     if all_names:
         idx = all_names.index(st.session_state.selected_bakery) if st.session_state.selected_bakery in all_names else 0
         chosen = st.selectbox("Select Bakery", all_names, index=idx)
         st.session_state.selected_bakery = chosen
-        
         b_rows = df_clean[df_clean['Bakery Name'] == chosen]
         existing_flavs = sorted([str(f) for f in b_rows['Fastelavnsbolle Type'].unique() if f and str(f).strip()])
         f_sel = st.selectbox("Flavor", existing_flavs + ["➕ New..."], key=f"f_{chosen}")
         f_name = st.text_input("New flavor name:") if f_sel == "➕ New..." else f_sel
 
         action = st.radio("Mode:", ["Rate it", "Wishlist"], index=0)
-
         if action == "Rate it":
             score = st.slider("Rating", 1.0, 5.0, 4.0, step=0.25)
             price = st.number_input("Price (DKK)", min_value=0, value=45)
@@ -115,47 +111,30 @@ with t1:
         row = display_df[display_df['Bakery Name'] == name].iloc[0]
         max_r = bakery_max_rating.get(name, 0)
         
-        if name == best_value_bakery: color, icon = "orange", "certificate"
+        # ICON PRIORITY: Best Value > Podium > Tried > Wishlist > To Visit
+        if name == best_value_bakery: 
+            color, icon = "orange", "usd" # Money sign icon
         elif name in top_3:
             rank = top_3.index(name); color = ["beige", "lightgray", "darkred"][rank]; icon = "star"
         elif max_r >= 1.0: color, icon = "green", "cutlery"
         elif 0.01 < max_r < 1.0: color, icon = "red", "heart"
         else: color, icon = "blue", "info-sign"
         folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
-    
-    m_out = st_folium(m, width=1100, height=500, key="main_map")
-    if m_out and m_out.get("last_object_clicked_tooltip"):
-        st.session_state.selected_bakery = m_out["last_object_clicked_tooltip"]
-        st.rerun()
+    st_folium(m, width=1100, height=500, key="main_map")
 
 with t2:
     st.subheader("Progress Checklist & Rating Count")
-    
-    # Building the list with counts
-    check_list = []
-    for n in sorted(display_df['Bakery Name'].unique()):
-        r = bakery_max_rating.get(n, 0)
-        # Get count from stats if it exists, else 0
-        cnt = int(stats.loc[n, 'Rating_Count']) if n in stats.index else 0
-        
-        status = "✅ Tried" if r >= 1.0 else "❤️ Wishlist" if 0.01 < r < 1.0 else "⭕ To Visit"
-        check_list.append({
-            "Bakery": n,
-            "Status": status,
-            "Times Rated": cnt
-        })
-    
+    check_list = [{"Bakery": n, "Status": ("✅ Tried" if bakery_max_rating.get(n,0) >= 1.0 else "❤️ Wishlist" if 0.01 < bakery_max_rating.get(n,0) < 1.0 else "⭕ To Visit"), "Times Rated": int(stats.loc[n, 'Rating_Count']) if n in stats.index else 0} for n in sorted(display_df['Bakery Name'].unique())]
     st.dataframe(pd.DataFrame(check_list), use_container_width=True, hide_index=True)
 
 with t3:
-    col1, col2 = st.columns(2)
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         st.subheader("🏆 Top Rated")
-        # Renaming columns for display
-        display_rankings = stats[['Avg_Rating', 'Rating_Count']].sort_values('Avg_Rating', ascending=False)
-        st.dataframe(display_rankings.rename(columns={"Avg_Rating": "Rating", "Rating_Count": "Total Reviews"}))
-    with col2:
-        st.subheader("💎 Best Value")
+        st.dataframe(stats[['Avg_Rating', 'Rating_Count']].sort_values('Avg_Rating', ascending=False).rename(columns={"Avg_Rating": "Rating", "Rating_Count": "Total Reviews"}))
+    with c2:
+        st.subheader("💰 Best Value")
         if best_value_bakery:
             st.metric(best_value_bakery, f"{stats.loc[best_value_bakery, 'Avg_Rating']:.2f} Stars", 
                       delta=f"DKK {stats.loc[best_value_bakery, 'Avg_Price']:.0f} avg price")
+            st.write("Best star-per-krone ratio among bakeries with price data.")
