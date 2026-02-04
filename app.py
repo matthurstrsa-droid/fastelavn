@@ -8,15 +8,11 @@ from streamlit_folium import st_folium
 st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
 st.title("🥐 The Community Fastelavnsbolle Critic")
 
-# 1. Start the connection (uses the secrets labeled [connections.gsheets])
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# 2. Point to your specific sheet ID
-sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
-
 # --- 1. THE LOADING SECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
+# Use ONLY the ID string here
 sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
+df = conn.read(spreadsheet=sheet_id, ttl="0m")
 
 # We use a try/except block to catch errors gracefully
 try:
@@ -89,6 +85,7 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
 
