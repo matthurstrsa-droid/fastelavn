@@ -48,30 +48,37 @@ with st.sidebar:
     user_comment = st.text_input("Short comment (optional)")
     
     if st.button("Submit Rating"):
-        # Get data for the selected bakery
+        # 1. Prepare the new data row as a simple list
+        # We find the bakery info again to get the lat/lon/address
         bakery_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
         
-        # Prepare the new row
-        new_row = pd.DataFrame([{
-            "Bakery Name": bakery_choice,
-            "Fastelavnsbolle Type": bakery_info.get('Fastelavnsbolle Type', 'Unknown'),
-            "Price (DKK)": bakery_info.get('Price (DKK)', 0),
-            "Address": bakery_info.get('Address', ''),
-            "Rating": user_score,
-            "lat": bakery_info['lat'],
-            "lon": bakery_info['lon']
-        }])
+        # This list must match the order of columns in your Google Sheet exactly!
+        # Based on your previous error, the order seems to be:
+        # Bakery Name, Type, Price, Address, Hours, Neighborhood, Source, Rating
+        new_row_data = [
+            bakery_choice, 
+            bakery_info.get('Fastelavnsbolle Type', ''),
+            bakery_info.get('Price (DKK)', 0),
+            bakery_info.get('Address', ''),
+            bakery_info.get('Opening Hours', ''),
+            bakery_info.get('Neighborhood', ''),
+            bakery_info.get('Source', ''),
+            user_score  # The new rating from the slider
+        ]
         
-        # Add to existing data
-        updated_df = pd.concat([df, new_row], ignore_index=True)
-        
-        # Write back to Google Sheets
-        conn.update(spreadsheet=sheet_id, data=updated_df)
-        
-        st.success(f"Rating for {bakery_choice} saved!")
-        st.balloons()
-        st.rerun()
-
+        try:
+            # 2. Use the underlying client to append the row directly
+            # This bypasses the 'UnsupportedOperation' check
+            client = conn.client._client # Access the authorized Google client
+            sheet = client.open_by_key(sheet_id).sheet1 # Opens the first tab
+            sheet.append_row(new_row_data)
+            
+            st.success(f"Rating for {bakery_choice} saved!")
+            st.balloons()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not save to Google Sheets: {e}")
 # --- 4. MAIN INTERFACE: MAP & LEADERBOARD ---
 
 # Calculate average ratings
+
