@@ -24,6 +24,9 @@ try:
     # Ensure required columns exist
     required = ['Bakery Name', 'Rating', 'lat', 'lon']
     # ... rest of your code
+except Exception as e:
+    st.error(f"Authentication Failed: {e}")
+    st.stop()
 
 # --- 3. SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
@@ -81,4 +84,5 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
 
