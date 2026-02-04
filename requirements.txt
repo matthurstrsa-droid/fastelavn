@@ -4,3 +4,5 @@ st-gsheets-connection
 folium
 streamlit-folium
 geopy
+gspread
+google-auth
