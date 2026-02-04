@@ -32,8 +32,8 @@ except Exception as e:
     st.stop()
 
 # --- 2. PROGRESS LOGIC ---
-# A bakery is "Tried" if it has a numeric rating
-tried_bakeries = df[df['Rating'] > 0]['Bakery Name'].unique().tolist()
+# A bakery is "Tried" if it has a rating greater than 0.1
+tried_bakeries = df[df['Rating'] > 0.1]['Bakery Name'].unique().tolist()
 
 # --- 3. SIDEBAR: PROGRESS & SUBMISSION ---
 with st.sidebar:
@@ -56,6 +56,7 @@ with st.sidebar:
         flavor_name = st.text_input("Flavor Name")
         address = st.text_input("Address (incl. Copenhagen)")
         neighborhood_input = st.selectbox("Neighborhood", ["Vesterbro", "Nørrebro", "Østerbro", "Indre By", "Frederiksberg", "Amager", "Other"])
+        final_lat, final_lon = 0.0, 0.0
     else:
         bakery_options = sorted(df['Bakery Name'].unique())
         default_idx = bakery_options.index(clicked_bakery) if clicked_bakery in bakery_options else 0
@@ -66,22 +67,4 @@ with st.sidebar:
         flavor_name = st.text_input("Flavor name:") if flavor_selection == "➕ Add new..." else flavor_selection
         
         b_info = df[df['Bakery Name'] == bakery_name].iloc[0]
-        final_lat, final_lon = b_info['lat'], b_info['lon']
-        address, neighborhood_input = b_info.get('Address', ''), b_info.get('Neighborhood', '')
-
-    user_score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
-    is_wishlist = st.checkbox("Add to Wishlist? ❤️")
-    photo_link = st.text_input("Photo URL")
-
-    if st.button("Submit"):
-        try:
-            if is_new_bakery:
-                location = geolocator.geocode(address)
-                if location:
-                    final_lat, final_lon = location.latitude, location.longitude
-                else:
-                    st.error("Address error")
-                    st.stop()
-            
-            # Using '99' as a placeholder rating for wishlist items
-            submit_score = 0.1 if is_wishlist and user_score == 8.0
+        final_lat, final_lon = b_info['lat'], b
