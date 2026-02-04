@@ -10,7 +10,7 @@ st.title("🥐 The Community Fastelavnsbolle Critic")
 
 # Connect to the Sheet
 conn = st.connection("gsheets", type=GSheetsConnection)
-url = "YOUR_GOOGLE_SHEET_URL_HERE"
+url = "https://docs.google.com/spreadsheets/d/1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo/edit?usp=sharing"
 
 # Load the data
 df = conn.read(spreadsheet=url, ttl="0m")
@@ -73,3 +73,4 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
