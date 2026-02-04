@@ -8,9 +8,12 @@ from streamlit_folium import st_folium
 st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
 st.title("🥐 The Community Fastelavnsbolle Critic")
 
-# Connect to the Sheet
-conn = st.connection("gsheets", type=GSheetsConnection)
-url = "fastelavnsbolle_guide_2025"
+# --- 1. CONNECT TO YOUR GOOGLE SHEET ---
+# We pass the spreadsheet ID directly here to force the connection to use secrets
+conn = st.connection("gsheets", type=GSheetsConnection, spreadsheet="PASTE_YOUR_SPREADSHEET_ID_HERE")
+
+# Now read without passing the ID again
+df = conn.read(ttl="0m")
 
 # Load the data
 sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
@@ -74,6 +77,7 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
 
