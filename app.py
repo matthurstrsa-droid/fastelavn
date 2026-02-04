@@ -1,113 +1,77 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+import folium
+from streamlit_folium import st_folium
 
-# 1. Create the connection specifically using the secrets
-# Note: We do NOT pass the spreadsheet ID here anymore
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# 2. Define your ID as a separate variable
-sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
-
-# 3. Use the connection to read, EXPLICITLY telling it to use the spreadsheet ID
-try:
-    df = conn.read(spreadsheet=sheet_id, ttl="0m")
-    st.write("Connection successful!")
-    st.dataframe(df.head()) # Just to see if data appears
-except Exception as e:
-    st.error(f"Authentication failed. The app is still trying to read this as a public file. Error: {e}")
-    
-# --- SETUP ---
+# --- 1. PAGE SETUP ---
+# This must be the very first Streamlit command
 st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
 st.title("🥐 The Community Fastelavnsbolle Critic")
 
-# --- 1. THE LOADING SECTION ---
+# --- 2. THE CONNECTION ---
+# Looks for [connections.gsheets] in your Streamlit Secrets
 conn = st.connection("gsheets", type=GSheetsConnection)
-# Use ONLY the ID string here
-sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
-df = conn.read(spreadsheet=sheet_id, ttl="0m")
 
-# We use a try/except block to catch errors gracefully
+# Your specific Google Sheet ID
+sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
+
 try:
+    # Attempt to read data using your Service Account credentials
     df = conn.read(spreadsheet=sheet_id, ttl="0m")
     
-    # CLEANING: This removes any accidental hidden spaces in your headers
+    # Clean up column names (removes accidental spaces)
     df.columns = df.columns.str.strip()
     
-    # DEBUG: This will show you exactly what your columns are named in a little box
-    st.info(f"Successfully loaded! Column names found: {list(df.columns)}")
+    # Check for required columns to prevent crashes
+    required_columns = ['Bakery Name', 'Rating', 'lat', 'lon']
+    for col in required_columns:
+        if col not in df.columns:
+            st.error(f"Missing column: '{col}'. Found: {list(df.columns)}")
+            st.stop()
 
 except Exception as e:
-    st.error(f"Failed to load data: {e}")
-    st.stop() # Stops the app here so we don't get the line 28 error
-# --- SIDEBAR: RATING FUNCTION ---
+    st.error("🔒 Authentication Failed or Sheet Not Found.")
+    st.info("Make sure your Secrets are filled and the Service Account email is an Editor on the Google Sheet.")
+    st.exception(e) # This shows the technical error for debugging
+    st.stop()
+
+# --- 3. SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
     st.header("⭐ Rate a Bakery")
-    # Dropdown based on your existing sheet names
+    
+    # Create dropdown from existing bakeries
     bakery_choice = st.selectbox("Which bakery did you visit?", df['Bakery Name'].unique())
     
-    # Rating sliders
-    user_score = st.slider("Your Rating", 1.0, 10.0, 8.0, step=0.5)
+    # Rating inputs
+    user_score = st.slider("Your Rating (1-10)", 1.0, 10.0, 8.0, step=0.5)
     user_comment = st.text_input("Short comment (optional)")
     
     if st.button("Submit Rating"):
-        # Create a new row with the same columns as your sheet
-        # We fill non-rating columns with the existing data for that bakery
+        # Get data for the selected bakery
         bakery_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
         
+        # Prepare the new row
         new_row = pd.DataFrame([{
             "Bakery Name": bakery_choice,
-            "Fastelavnsbolle Type": bakery_info['Fastelavnsbolle Type'],
-            "Price (DKK)": bakery_info['Price (DKK)'],
-            "Address": bakery_info['Address'],
+            "Fastelavnsbolle Type": bakery_info.get('Fastelavnsbolle Type', 'Unknown'),
+            "Price (DKK)": bakery_info.get('Price (DKK)', 0),
+            "Address": bakery_info.get('Address', ''),
             "Rating": user_score,
-            "lat": bakery_info['lat'], # Assumes you added these columns
+            "lat": bakery_info['lat'],
             "lon": bakery_info['lon']
         }])
         
-        # WRITE to the Google Sheet
+        # Add to existing data
         updated_df = pd.concat([df, new_row], ignore_index=True)
-        conn.update(spreadsheet=url, data=updated_df)
         
-        st.success(f"Rating for {bakery_choice} saved! Refreshing...")
+        # Write back to Google Sheets
+        conn.update(spreadsheet=sheet_id, data=updated_df)
+        
+        st.success(f"Rating for {bakery_choice} saved!")
+        st.balloons()
         st.rerun()
 
-# --- MAIN: MAP & LEADERBOARD ---
-# We calculate the average rating per bakery for the map popups
-avg_ratings = df.groupby('Bakery Name')['Rating'].mean().reset_index()
+# --- 4. MAIN INTERFACE: MAP & LEADERBOARD ---
 
-col_map, col_list = st.columns([2, 1])
-
-with col_map:
-    m = folium.Map(location=[55.6761, 12.5683], zoom_start=12)
-    # Use unique bakeries for map pins to avoid overlapping duplicates
-    map_data = df.drop_duplicates(subset=['Bakery Name'])
-    
-    for _, row in map_data.iterrows():
-        # Get the average for this specific bakery
-        score = avg_ratings[avg_ratings['Bakery Name'] == row['Bakery Name']]['Rating'].values[0]
-        
-        folium.Marker(
-            [row['lat'], row['lon']],
-            popup=f"<b>{row['Bakery Name']}</b><br>Avg Rating: {score:.1f}/10",
-            tooltip=row['Bakery Name']
-        ).add_to(m)
-    st_folium(m, width="100%", height=500)
-
-with col_list:
-    st.subheader("🏆 Top Rated Buns")
-    top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
-    st.dataframe(top_buns, hide_index=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Calculate average ratings
