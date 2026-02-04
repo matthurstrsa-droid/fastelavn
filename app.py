@@ -4,9 +4,11 @@ import gspread
 from google.oauth2.service_account import Credentials
 import folium
 from streamlit_folium import st_folium
+from geopy.geocoders import Nominatim  # The "Address Lookup" tool
 
 # --- 1. CONFIG & AUTH ---
 st.set_page_config(page_title="Bakery Critic", layout="wide")
+geolocator = Nominatim(user_agent="bakery_explorer") # Initialize Geocoder
 
 try:
     scope = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -38,11 +40,12 @@ with st.sidebar:
     if is_new_bakery:
         bakery_name = st.text_input("New Bakery Name")
         flavor_name = st.text_input("What flavor did you try?")
-        new_lat = st.number_input("Latitude", format="%.4f", value=55.6761)
-        new_lon = st.number_input("Longitude", format="%.4f", value=12.5683)
-        address = st.text_input("Address")
-        # Added Neighborhood input for new bakeries
+        # Replaced lat/lon input with Address
+        address = st.text_input("Address (e.g., Gammel Kongevej 109, Copenhagen)")
         neighborhood_input = st.selectbox("Neighborhood", ["Vesterbro", "Nørrebro", "Østerbro", "Indre By", "Christianshavn", "Amager", "Frederiksberg", "Other"])
+        
+        # Internal placeholders for geocoding
+        submit_lat, submit_lon = None, None
     else:
         bakery_name = st.selectbox("Which bakery?", sorted(df['Bakery Name'].unique()))
         
@@ -55,7 +58,7 @@ with st.sidebar:
             flavor_name = flavor_selection
             
         b_info = df[df['Bakery Name'] == bakery_name].iloc[0]
-        new_lat, new_lon, address = b_info['lat'], b_info['lon'], b_info.get('Address', '')
+        submit_lat, submit_lon, address = b_info['lat'], b_info['lon'], b_info.get('Address', '')
         neighborhood_input = b_info.get('Neighborhood', '')
 
     user_score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
@@ -63,9 +66,20 @@ with st.sidebar:
 
     if st.button("Submit to Google Sheets"):
         try:
+            # If it's a new bakery, we need to find the lat/lon FROM the address
+            if is_new_bakery:
+                with st.spinner("Finding bakery on the map..."):
+                    location = geolocator.geocode(address)
+                    if location:
+                        submit_lat = location.latitude
+                        submit_lon = location.longitude
+                    else:
+                        st.error("Could not find that address. Try adding ', Copenhagen' at the end.")
+                        st.stop()
+
             new_row = [
                 bakery_name, flavor_name, "", address, 
-                float(new_lat), float(new_lon), "", neighborhood_input, 
+                float(submit_lat), float(submit_lon), "", neighborhood_input, 
                 "App User", user_score, photo_link
             ]
             worksheet.append_row(new_row)
@@ -78,26 +92,32 @@ with st.sidebar:
 # --- 3. MAIN UI ---
 st.title("🥐 Copenhagen Fastelavnsbolle Tracker")
 
-# NEIGHBORHOOD FILTER
 all_neighborhoods = ["All"] + sorted([n for n in df['Neighborhood'].unique() if n])
 selected_n = st.selectbox("📍 Filter by Neighborhood", all_neighborhoods)
 
-# Filter the dataframe for the map and rankings
-if selected_n != "All":
-    display_df = df[df['Neighborhood'] == selected_n]
-else:
-    display_df = df
+display_df = df if selected_n == "All" else df[df['Neighborhood'] == selected_n]
 
 tab1, tab2 = st.tabs(["📍 Map", "🏆 Rankings"])
 
 with tab1:
-    st.subheader(f"Bakery Map: {selected_n}")
     m = folium.Map(location=[55.6761, 12.5683], zoom_start=12)
     for _, row in display_df.iterrows():
         folium.Marker(
             location=[row['lat'], row['lon']], 
-            popup=f"{row['Bakery Name']}: {row['Fastelavnsbolle Type']} ({row['Rating']}/10)",
+            popup=f"<b>{row['Bakery Name']}</b><br>{row['Fastelavnsbolle Type']}<br>Rating: {row['Rating']}/10",
             tooltip=row['Bakery Name']
         ).add_to(m)
-    st_folium(m, width=900,
-             )
+    st_folium(m, width=900, height=500, key="main_map")
+
+with tab2:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Top Bakeries")
+        b_stats = display_df.groupby('Bakery Name')['Rating'].agg(['mean', 'count']).reset_index()
+        b_stats.columns = ['Bakery Name', 'Avg Rating', 'Reviews']
+        st.dataframe(b_stats.sort_values('Avg Rating', ascending=False), hide_index=True, use_container_width=True)
+    with col2:
+        st.subheader("Top Flavours")
+        f_stats = display_df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index()
+        f_stats.columns = ['Flavour', 'Bakery', 'Avg Rating', 'Reviews']
+        st.dataframe(f_stats.sort_values('Avg Rating', ascending=False), hide_index=True, use_container_width=True)
