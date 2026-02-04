@@ -8,16 +8,18 @@ from streamlit_folium import st_folium
 st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
 st.title("🥐 The Community Fastelavnsbolle Critic")
 
-# --- 1. CONNECT TO YOUR GOOGLE SHEET ---
-# We pass the spreadsheet ID directly here to force the connection to use secrets
-conn = st.connection("gsheets", type=GSheetsConnection, spreadsheet="1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo")
+# 1. Start the connection (uses the secrets labeled [connections.gsheets])
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Now read without passing the ID again
-df = conn.read(ttl="0m")
-
-# Load the data
+# 2. Point to your specific sheet ID
 sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
-df = conn.read(spreadsheet=sheet_id, worksheet="Fastelavnsbolle Guide", ttl="0m")
+
+# 3. Read the data
+try:
+    df = conn.read(spreadsheet=sheet_id, ttl="0m")
+    st.success("Connected to the bun database!")
+except Exception as e:
+    st.error(f"Almost there! But there's a connection issue: {e}")
 
 # --- SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
@@ -77,6 +79,7 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
 
