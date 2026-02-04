@@ -38,40 +38,51 @@ except Exception as e:
 with st.sidebar:
     st.header("⭐ Rate a Bakery")
     if not df.empty:
-        # Using your exact column "Bakery Name"
+        # 1. Choose Bakery
         bakery_list = sorted(df['Bakery Name'].unique())
         bakery_choice = st.selectbox("Which bakery?", bakery_list)
+        
+        # 2. Get existing flavors for THIS bakery only
+        existing_flavors = df[df['Bakery Name'] == bakery_choice]['Fastelavnsbolle Type'].unique().tolist()
+        existing_flavors = [f for f in existing_flavors if f] # Remove empty ones
+        
+        # Add a special "Other" option
+        flavor_options = existing_flavors + ["➕ Add new flavor..."]
+        flavor_selection = st.selectbox("Which flavor?", flavor_options)
+        
+        # 3. If they chose "Add new", show a text box
+        final_flavor = flavor_selection
+        if flavor_selection == "➕ Add new flavor...":
+            final_flavor = st.text_input("Type the new flavor name:")
+
         user_score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
         
         if st.button("Submit Rating"):
-            try:
-                # Find the existing info to keep the row complete
-                b_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
-                
-                # Append row matching your exact 10 columns:
-                # Bakery Name, Fastelavnsbolle Type, Price (DKK), Address, lat, lon, Opening Hours, Neighborhood, Source, Rating
-                new_row = [
-                    bakery_choice, 
-                    b_info.get('Fastelavnsbolle Type', ''),
-                    b_info.get('Price (DKK)', ''),
-                    b_info.get('Address', ''),
-                    float(b_info['lat']), 
-                    float(b_info['lon']),
-                    b_info.get('Opening Hours', ''),
-                    b_info.get('Neighborhood', ''),
-                    "App User", # Source
-                    user_score   # Rating
-                ]
-                
-                worksheet.append_row(new_row)
-                st.success("Rating saved!")
-                st.balloons()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Save error: {e}")
-    else:
-        st.warning("No data found.")
-
+            if not final_flavor:
+                st.error("Please provide a flavor name!")
+            else:
+                try:
+                    b_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
+                    
+                    new_row = [
+                        bakery_choice, 
+                        final_flavor,       # Uses the dropdown OR the text box
+                        b_info.get('Price (DKK)', ''),
+                        b_info.get('Address', ''),
+                        float(b_info['lat']), 
+                        float(b_info['lon']),
+                        b_info.get('Opening Hours', ''),
+                        b_info.get('Neighborhood', ''),
+                        "App User", 
+                        user_score   
+                    ]
+                    
+                    worksheet.append_row(new_row)
+                    st.success(f"Rated {bakery_choice}'s {final_flavor}!")
+                    st.balloons()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Save error: {e}")
 # --- 4. MAIN MAP & LEADERBOARD ---
 col1, col2 = st.columns([2, 1])
 
@@ -97,3 +108,4 @@ with col2:
         stats = df.groupby('Bakery Name')['Rating'].mean().reset_index()
         stats = stats.sort_values(by="Rating", ascending=False)
         st.dataframe(stats, use_container_width=True, hide_index=True)
+
