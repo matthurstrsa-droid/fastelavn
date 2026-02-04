@@ -79,3 +79,4 @@ with col1:
             location=[row['lat'], row['lon']], 
             popup=f"{row['Bakery Name']}: {row['Rating']}/10",
             tooltip=row
+        )
