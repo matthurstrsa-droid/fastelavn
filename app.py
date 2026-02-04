@@ -14,13 +14,23 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # 2. Point to your specific sheet ID
 sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
 
-# 3. Read the data
+# --- 1. THE LOADING SECTION ---
+conn = st.connection("gsheets", type=GSheetsConnection)
+sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
+
+# We use a try/except block to catch errors gracefully
 try:
     df = conn.read(spreadsheet=sheet_id, ttl="0m")
-    st.success("Connected to the bun database!")
-except Exception as e:
-    st.error(f"Almost there! But there's a connection issue: {e}")
+    
+    # CLEANING: This removes any accidental hidden spaces in your headers
+    df.columns = df.columns.str.strip()
+    
+    # DEBUG: This will show you exactly what your columns are named in a little box
+    st.info(f"Successfully loaded! Column names found: {list(df.columns)}")
 
+except Exception as e:
+    st.error(f"Failed to load data: {e}")
+    st.stop() # Stops the app here so we don't get the line 28 error
 # --- SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
     st.header("⭐ Rate a Bakery")
@@ -79,6 +89,7 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
 
