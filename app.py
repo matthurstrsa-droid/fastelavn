@@ -13,7 +13,7 @@ st.title("🥐 Your 2025 Fastelavnsbolle Guide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # Replace the URL below with your 'fastelavnsbolle_guide_2025' share link
-url = "https://docs.google.com/spreadsheets/d/1-B14hPOCNUrhaYVNzh3cdxV_Wa98vRC_/edit?usp=sharing&ouid=112983287117325045101&rtpof=true&sd=true"
+url = "https://docs.google.com/spreadsheets/d/1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo/edit?usp=sharing"
 df = conn.read(spreadsheet=url)
 
 # --- 2. GEOCODING FUNCTION ---
@@ -50,3 +50,4 @@ st_folium(m, width="100%", height=500)
 # --- 4. DATA EXPLORER ---
 st.subheader("📊 Full Bun Inventory")
 st.dataframe(df[['Bakery Name', 'Fastelavnsbolle Type', 'Price (DKK)', 'Neighborhood']], use_container_width=True)
+
