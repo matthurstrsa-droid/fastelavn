@@ -13,7 +13,8 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 url = "fastelavnsbolle_guide_2025"
 
 # Load the data
-df = conn.read(spreadsheet=url, ttl="0m")
+sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo/edit?gid=91624038"
+df = conn.read(spreadsheet=sheet_id, worksheet="Sheet1", ttl="0m")
 
 # --- SIDEBAR: RATING FUNCTION ---
 with st.sidebar:
@@ -73,5 +74,6 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
