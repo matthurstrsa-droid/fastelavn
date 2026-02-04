@@ -135,3 +135,4 @@ with t2:
         s = "✅ Tried" if r >= 1.0 else "❤️ Wishlist" if 0.05 <= r <= 0.2 else "⭕ To Visit"
         items.append({"Status": s, "Bakery": n})
     st.table(pd.DataFrame
+            )
