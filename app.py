@@ -95,13 +95,20 @@ with tab1:
 
 with tab2:
     c1, c2 = st.columns(2)
+    
     with c1:
-        st.subheader("Top Bakeries (Average)")
-        bakery_stats = df.groupby('Bakery Name')['Rating'].mean().reset_index()
-        st.dataframe(bakery_stats.sort_values(by="Rating", ascending=False), hide_index=True)
+        st.subheader("Top Bakeries (Overall)")
+        # Calculate mean and count for Bakeries
+        bakery_stats = df.groupby('Bakery Name')['Rating'].agg(['mean', 'count']).reset_index()
+        bakery_stats.columns = ['Bakery Name', 'Avg Rating', 'Reviews']
+        bakery_stats = bakery_stats.sort_values(by="Avg Rating", ascending=False)
+        st.dataframe(bakery_stats, hide_index=True, use_container_width=True)
     
     with c2:
         st.subheader("Top Specific Flavours")
-        # Shows the best specific bolle in the city
-        flavor_stats = df.groupby(['Bakery Name', 'Fastelavnsbolle Type'])['Rating'].mean().reset_index()
-        st.dataframe(flavor_stats.sort_values(by="Rating", ascending=False), hide_index=True)
+        # Calculate mean and count for specific Flavour + Bakery combos
+        flavor_stats = df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index()
+        flavor_stats.columns = ['Flavour', 'Bakery', 'Avg Rating', 'Reviews']
+        flavor_stats = flavor_stats.sort_values(by="Avg Rating", ascending=False)
+        st.dataframe(flavor_stats, hide_index=True, use_container_width=True)
+
