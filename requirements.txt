@@ -3,3 +3,4 @@ pandas
 st-gsheets-connection
 folium
 streamlit-folium
+geopy
