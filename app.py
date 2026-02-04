@@ -1,4 +1,11 @@
 import streamlit as st
+
+# DEBUG CHECK
+st.write("Does the app see the secret?", "my_bakery_db" in st.secrets.get("connections", {}))
+if "connections" in st.secrets and "my_bakery_db" in st.secrets["connections"]:
+    st.write("Is the email correct?", st.secrets["connections"]["my_bakery_db"].get("client_email"))
+
+import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
@@ -89,6 +96,7 @@ with col_list:
     st.subheader("🏆 Top Rated")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True, use_container_width=True)
+
 
 
 
