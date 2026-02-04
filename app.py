@@ -100,3 +100,4 @@ with tab1:
             tooltip=row['Bakery Name']
         ).add_to(m)
     st_folium(m, width=900,
+             )
