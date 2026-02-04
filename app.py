@@ -1,9 +1,21 @@
 import streamlit as st
-import pandas as pd
 from streamlit_gsheets import GSheetsConnection
-import folium
-from streamlit_folium import st_folium
 
+# 1. Create the connection specifically using the secrets
+# Note: We do NOT pass the spreadsheet ID here anymore
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 2. Define your ID as a separate variable
+sheet_id = "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
+
+# 3. Use the connection to read, EXPLICITLY telling it to use the spreadsheet ID
+try:
+    df = conn.read(spreadsheet=sheet_id, ttl="0m")
+    st.write("Connection successful!")
+    st.dataframe(df.head()) # Just to see if data appears
+except Exception as e:
+    st.error(f"Authentication failed. The app is still trying to read this as a public file. Error: {e}")
+    
 # --- SETUP ---
 st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
 st.title("🥐 The Community Fastelavnsbolle Critic")
@@ -85,6 +97,7 @@ with col_list:
     st.subheader("🏆 Top Rated Buns")
     top_buns = avg_ratings.sort_values(by="Rating", ascending=False)
     st.dataframe(top_buns, hide_index=True)
+
 
 
 
