@@ -8,41 +8,42 @@ from geopy.geocoders import Nominatim
 
 # --- 1. CONFIG & DATA ---
 st.set_page_config(page_title="Bakery Tracker", layout="wide")
-geolocator = Nominatim(user_agent="bakery_explorer_v14")
+geolocator = Nominatim(user_agent="bakery_explorer_v15")
 
 if "selected_bakery" not in st.session_state:
     st.session_state.selected_bakery = None
 
-@st.cache_data(ttl=2)
-def load_data():
+@st.cache_resource # Use resource caching for the connection itself
+def get_worksheet():
     creds_info = st.secrets["connections"]["my_bakery_db"]
     credentials = Credentials.from_service_account_info(creds_info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
     gc = gspread.authorize(credentials)
     sh = gc.open_by_key("1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo")
-    worksheet = sh.get_worksheet(0)
-    data = worksheet.get_all_records()
+    return sh.get_worksheet(0)
+
+@st.cache_data(ttl=5) # Cache the data slightly longer to prevent API rate limits
+def load_data():
+    ws = get_worksheet()
+    data = ws.get_all_records()
     df = pd.DataFrame(data)
-    
-    # Ensure numeric columns
     df['Rating'] = pd.to_numeric(df['Rating'], errors='coerce').fillna(0)
     df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
     df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
-    return df, worksheet
+    return df
 
 try:
-    df, worksheet = load_data()
+    df = load_data()
+    worksheet = get_worksheet() # Direct handle for writes
     df_clean = df.dropna(subset=['lat', 'lon'])
-    # Get the best rating for each bakery name
     bakery_status = df_clean.groupby('Bakery Name')['Rating'].max().to_dict()
 except Exception as e:
-    st.error(f"Error loading data: {e}")
+    st.error(f"Connection Error: {e}")
     st.stop()
 
 # --- 2. SIDEBAR (The Command Center) ---
 with st.sidebar:
     st.header("🥯 Bakery Actions")
     
-    # ADD NEW BAKERY
     is_new = st.checkbox("➕ Add New Bakery")
     if is_new:
         with st.form("new_bakery"):
@@ -52,12 +53,11 @@ with st.sidebar:
             if st.form_submit_button("Add to Map"):
                 loc = geolocator.geocode(n_addr)
                 if loc:
-                    worksheet.append_row([n_name, "Base", "", n_addr, loc.latitude, loc.longitude, "", n_hood, "User", 0.0, ""])
+                    worksheet.append_row([n_name, "Base", "", n_addr, loc.latitude, loc.longitude, "", n_hood, "User", 0.0, ""], value_input_option='USER_ENTERED')
                     st.cache_data.clear(); st.rerun()
                 else: st.error("Address not found.")
     st.divider()
 
-    # SELECTION & ACTIONS
     all_bakeries = sorted(df_clean['Bakery Name'].unique().tolist())
     if all_bakeries:
         target = st.session_state.selected_bakery
@@ -71,27 +71,35 @@ with st.sidebar:
 
         if is_wish:
             if st.button("❌ Remove from Wishlist", use_container_width=True):
-                all_rows = worksheet.get_all_values()
-                for i, row in enumerate(all_rows):
-                    # Column 0 is Name, Column 9 is Rating
+                all_vals = worksheet.get_all_values()
+                for i, row in enumerate(all_vals):
                     if row[0] == chosen and (0.01 < float(row[9] or 0) < 0.2):
                         worksheet.delete_rows(i + 1)
                         break
                 st.cache_data.clear(); st.rerun()
 
         st.divider()
-        mode = st.radio("Action:", ["Rate it", "Add to Wishlist"], index=1 if is_wish else 0, key=f"m_{chosen}")
+        
+        # --- FLAVORS ARE BACK ---
+        flavors = sorted([str(f) for f in b_rows['Fastelavnsbolle Type'].unique() if f and str(f).strip()])
+        f_sel = st.selectbox("Flavor", flavors + ["➕ New..."], key=f"flav_{chosen}")
+        f_name = st.text_input("New flavor name:") if f_sel == "➕ New..." else f_sel
+
+        mode = st.radio("Action:", ["Rate it", "Add to Wishlist"], index=1 if is_wish else 0, key=f"mode_{chosen}")
         
         if mode == "Rate it":
             score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
             if st.button("Submit Rating ✅"):
                 b_data = b_rows.iloc[0]
-                worksheet.append_row([str(chosen), "New Flavor", "", str(b_data['Address']), float(b_data['lat']), float(b_data['lon']), "", str(b_data['Neighborhood']), "User", float(score), ""])
+                new_row = [str(chosen), str(f_name), "", str(b_data['Address']), float(b_data['lat']), float(b_data['lon']), "", str(b_data['Neighborhood']), "User", float(score), ""]
+                worksheet.append_row(new_row, value_input_option='USER_ENTERED')
                 st.cache_data.clear(); st.rerun()
         else:
             if st.button("Confirm Wishlist ❤️"):
                 b_data = b_rows.iloc[0]
-                worksheet.append_row([str(chosen), "Wishlist", "", str(b_data['Address']), float(b_data['lat']), float(b_data['lon']), "", str(b_data['Neighborhood']), "User", 0.1, ""])
+                # Fix: Standardized list for Google Sheets
+                wish_row = [str(chosen), "Wishlist", "", str(b_data['Address']), float(b_data['lat']), float(b_data['lon']), "", str(b_data['Neighborhood']), "User", 0.1, ""]
+                worksheet.append_row(wish_row, value_input_option='USER_ENTERED')
                 st.cache_data.clear(); st.rerun()
 
 # --- 3. MAIN UI ---
@@ -116,11 +124,5 @@ with t1:
 
 with t2:
     st.subheader("Bakery Status Overview")
-    list_data = []
-    for n in sorted(df_clean['Bakery Name'].unique()):
-        r = bakery_status.get(n, 0)
-        s = "✅ Tried" if r >= 1.0 else "❤️ Wishlist" if 0.01 < r < 0.2 else "⭕ To Visit"
-        list_data.append({"Status": s, "Bakery": n})
-    
-    # We use st.dataframe instead of st.table to prevent the Arrow error
+    list_data = [{"Status": ("✅ Tried" if bakery_status.get(n,0) >= 1.0 else "❤️ Wishlist" if 0.01 < bakery_status.get(n,0) < 0.2 else "⭕ To Visit"), "Bakery": n} for n in sorted(df_clean['Bakery Name'].unique())]
     st.dataframe(pd.DataFrame(list_data), use_container_width=True, hide_index=True)
