@@ -7,7 +7,7 @@ from streamlit_folium import st_folium
 
 # --- 1. PAGE SETUP ---
 st.set_page_config(page_title="Bakery Critic", layout="wide")
-st.title("🥐 The Final Bakery Critic")
+st.title("🥐 The Ultimate Fastelavnsbolle Map")
 
 # --- 2. AUTHENTICATION & DATA LOADING ---
 try:
@@ -23,89 +23,85 @@ try:
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
 
-    # Convert coordinates to numbers
     df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
     df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
     df['Rating'] = pd.to_numeric(df['Rating'], errors='coerce')
-    
     df = df.dropna(subset=['lat', 'lon'])
 
 except Exception as e:
     st.error(f"Login or Data Error: {e}")
     st.stop()
 
-# --- 3. SIDEBAR: SUBMIT RATING ---
+# --- 3. SIDEBAR: SUBMIT RATING & PHOTO ---
 with st.sidebar:
-    st.header("⭐ Rate a Bakery")
+    st.header("⭐ Rate a Flavour")
     if not df.empty:
-        # 1. Choose Bakery
         bakery_list = sorted(df['Bakery Name'].unique())
         bakery_choice = st.selectbox("Which bakery?", bakery_list)
         
-        # 2. Get existing flavors for THIS bakery only
+        # Flavor Logic
         existing_flavors = df[df['Bakery Name'] == bakery_choice]['Fastelavnsbolle Type'].unique().tolist()
-        existing_flavors = [f for f in existing_flavors if f] # Remove empty ones
-        
-        # Add a special "Other" option
+        existing_flavors = [f for f in existing_flavors if f]
         flavor_options = existing_flavors + ["➕ Add new flavor..."]
         flavor_selection = st.selectbox("Which flavor?", flavor_options)
         
-        # 3. If they chose "Add new", show a text box
         final_flavor = flavor_selection
         if flavor_selection == "➕ Add new flavor...":
             final_flavor = st.text_input("Type the new flavor name:")
 
         user_score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
         
+        # PHOTO UPLOADER
+        uploaded_file = st.file_uploader("Upload a photo of the bolle", type=['jpg', 'png', 'jpeg'])
+        if uploaded_file:
+            st.image(uploaded_file, caption="Looks delicious!", use_container_width=True)
+            st.info("Note: Photo storage requires a Cloud bucket. For now, this stays in the app's memory!")
+
         if st.button("Submit Rating"):
             if not final_flavor:
                 st.error("Please provide a flavor name!")
             else:
                 try:
                     b_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
-                    
+                    # We add a placeholder for the Photo URL in the sheet (Column 11)
                     new_row = [
-                        bakery_choice, 
-                        final_flavor,       # Uses the dropdown OR the text box
-                        b_info.get('Price (DKK)', ''),
-                        b_info.get('Address', ''),
-                        float(b_info['lat']), 
-                        float(b_info['lon']),
-                        b_info.get('Opening Hours', ''),
-                        b_info.get('Neighborhood', ''),
-                        "App User", 
-                        user_score   
+                        bakery_choice, final_flavor, b_info.get('Price (DKK)', ''),
+                        b_info.get('Address', ''), float(b_info['lat']), float(b_info['lon']),
+                        b_info.get('Opening Hours', ''), b_info.get('Neighborhood', ''),
+                        "App User", user_score, "" # The empty string is for the Photo URL
                     ]
-                    
                     worksheet.append_row(new_row)
                     st.success(f"Rated {bakery_choice}'s {final_flavor}!")
                     st.balloons()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Save error: {e}")
-# --- 4. MAIN MAP & LEADERBOARD ---
-col1, col2 = st.columns([2, 1])
+    else:
+        st.warning("No data found.")
 
-with col1:
-    st.subheader("Bakery Map")
+# --- 4. MAIN INTERFACE ---
+tab1, tab2 = st.tabs(["📍 Bakery Map", "🏆 Leaderboards"])
+
+with tab1:
     m = folium.Map(location=[55.6761, 12.5683], zoom_start=12)
-    
     for _, row in df.iterrows():
-        # Tooltip shows Name + Type
         label = f"{row['Bakery Name']} ({row['Fastelavnsbolle Type']})"
         folium.Marker(
             location=[row['lat'], row['lon']], 
-            popup=f"Rating: {row['Rating']}/10 - Price: {row['Price (DKK)']} DKK",
+            popup=f"Rating: {row['Rating']}/10 - {row['Fastelavnsbolle Type']}",
             tooltip=label
         ).add_to(m)
+    st_folium(m, width=900, height=600, key="bakery_map")
 
-    st_folium(m, width=700, height=500, key="bakery_map")
-
-with col2:
-    st.subheader("Leaderboard")
-    if not df.empty:
-        # Show top rated bakeries
-        stats = df.groupby('Bakery Name')['Rating'].mean().reset_index()
-        stats = stats.sort_values(by="Rating", ascending=False)
-        st.dataframe(stats, use_container_width=True, hide_index=True)
-
+with tab2:
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Top Bakeries (Average)")
+        bakery_stats = df.groupby('Bakery Name')['Rating'].mean().reset_index()
+        st.dataframe(bakery_stats.sort_values(by="Rating", ascending=False), hide_index=True)
+    
+    with c2:
+        st.subheader("Top Specific Flavours")
+        # Shows the best specific bolle in the city
+        flavor_stats = df.groupby(['Bakery Name', 'Fastelavnsbolle Type'])['Rating'].mean().reset_index()
+        st.dataframe(flavor_stats.sort_values(by="Rating", ascending=False), hide_index=True)
