@@ -32,7 +32,7 @@ except Exception as e:
     st.stop()
 
 # --- 2. THE MAP (Moved up so we can capture clicks) ---
-st.title("🥐 Copenhagen Fastelavnsbolle Tracker")
+st.title("🥐 Copenhagen Fastelavnsbolle 2026")
 
 all_neighborhoods = ["All"] + sorted([n for n in df['Neighborhood'].unique() if n])
 selected_n = st.selectbox("📍 Filter by Neighborhood", all_neighborhoods)
@@ -104,7 +104,7 @@ with st.sidebar:
         address = b_info.get('Address', '')
         neighborhood_input = b_info.get('Neighborhood', '')
 
-    user_score = st.slider("Rating", 1.0, 10.0, 8.0, step=0.5)
+    user_score = st.slider("Rating", 1.0, 5.0, 3.0, step=0.25)
     photo_link = st.text_input("Photo URL")
 
     if st.button("Submit Rating"):
@@ -130,3 +130,4 @@ with tab2:
         st.subheader("Top Flavours")
         st.dataframe(display_df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index().sort_values('mean', ascending=False), hide_index=True)
         
+
