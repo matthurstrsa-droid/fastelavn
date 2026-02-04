@@ -1,62 +1,51 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
 import folium
 from streamlit_folium import st_folium
 
-# --- APP SETUP ---
-st.set_page_config(page_title="DK Fastelavnsbolle Map 2026", layout="wide")
+# 1. Page Config
+st.set_page_config(page_title="Fastelavnsbolle 2026", layout="wide")
+
 st.title("🥐 The Great 2026 Fastelavnsbolle Map")
 
-# --- DATABASE CONNECTION (Google Sheets) ---
-# This connects to a sheet where everyone's ratings are stored
-conn = st.connection("gsheets", type=GSheetsConnection)
+# 2. The Data (This replaces the need for Google Sheets for now)
+if 'db' not in st.session_state:
+    st.session_state.db = pd.DataFrame([
+        {"Bakery": "Juno the Bakery", "City": "Copenhagen", "Flavor": "Pistachio", "Rating": 9.5, "lat": 55.7039, "lon": 12.5830},
+        {"Bakery": "Hart Bageri", "City": "Copenhagen", "Flavor": "Classic Custard", "Rating": 8.8, "lat": 55.6791, "lon": 12.5400},
+        {"Bakery": "Andersen Bakery", "City": "Copenhagen", "Flavor": "Yuzu Raspberry", "Rating": 9.2, "lat": 55.6672, "lon": 12.5765},
+    ])
 
-def load_data():
-    return conn.read(ttl="0m") # Set ttl to 0 so we always see the latest buns
-
-df = load_data()
-
-# --- FEATURE 1: ADD A NEW RATING ---
+# 3. Sidebar to add new buns (stores them while the app is open)
 with st.sidebar:
-    st.header("Rate a New Bun")
-    with st.form("add_form"):
-        bakery_name = st.text_input("Bakery Name")
-        city = st.selectbox("City", ["Copenhagen", "Aarhus", "Odense", "Aalborg", "Other"])
+    st.header("Rate a Bun")
+    with st.form("add_form", clear_on_submit=True):
+        name = st.text_input("Bakery Name")
         flavor = st.text_input("Flavor")
-        rating = st.slider("Rating (1-10)", 1, 10, 5)
+        score = st.slider("Rating", 1.0, 10.0, 8.0)
+        st.write("Tip: Use 55.67 for Lat and 12.56 for Lon for Copenhagen center.")
+        lat = st.number_input("Latitude", value=55.6761, format="%.4f")
+        lon = st.number_input("Longitude", value=12.5683, format="%.4f")
+        submit = st.form_submit_button("Add to Map")
         
-        # In a real app, you'd geocode this, but for now we'll store coordinates
-        # Tip: Use a hidden lookup table for major bakery coordinates!
-        lat = st.number_input("Lat (e.g. 55.67)", format="%.4f", value=55.6761)
-        lon = st.number_input("Lon (e.g. 12.56)", format="%.4f", value=12.5683)
-        
-        submit = st.form_submit_button("Submit to Community")
-        
-        if submit:
-            new_data = pd.DataFrame([{"Bakery": bakery_name, "City": city, "Flavor": flavor, "Rating": rating, "lat": lat, "lon": lon}])
-            # Append logic for Google Sheets goes here
-            st.success("Rating added! (Requires GSheets Write Access)")
+        if submit and name:
+            new_entry = pd.DataFrame([{"Bakery": name, "City": "Copenhagen", "Flavor": flavor, "Rating": score, "lat": lat, "lon": lon}])
+            st.session_state.db = pd.concat([st.session_state.db, new_entry], ignore_index=True)
+            st.success("Added! Note: This is a demo; data won't save permanently yet.")
 
-# --- FEATURE 2: MAP VIEW ---
-st.subheader("📍 Where the Buns Are")
+# 4. Display Map and Leaderboard
+col_left, col_right = st.columns([2, 1])
 
-# Center map on Denmark
-m = folium.Map(location=[55.6761, 12.5683], zoom_start=12)
+with col_left:
+    m = folium.Map(location=[55.68, 12.58], zoom_start=12)
+    for _, row in st.session_state.db.iterrows():
+        folium.Marker(
+            [row['lat'], row['lon']], 
+            popup=f"{row['Bakery']} - {row['Rating']}/10",
+            tooltip=row['Bakery']
+        ).add_to(m)
+    st_folium(m, width="100%", height=500)
 
-# Add markers for each bakery in the shared database
-for index, row in df.iterrows():
-    folium.Marker(
-        [row['lat'], row['lon']],
-        popup=f"{row['Bakery']}: {row['Rating']}/10",
-        tooltip=row['Bakery']
-    ).add_to(m)
-
-st_folium(m, width=1000, height=500)
-
-# --- FEATURE 3: AGGREGATED LEADERBOARD ---
-st.subheader("🏆 The 2026 Leaderboard")
-if not df.empty:
-    leaderboard = df.groupby("Bakery")["Rating"].agg(['mean', 'count']).sort_values(by="mean", ascending=False)
-    leaderboard.columns = ["Average Rating", "Number of Reviews"]
-    st.dataframe(leaderboard, use_container_width=True)
+with col_right:
+    st.subheader("🏆 Leaderboard")
+    st.dataframe(st.session_state.db.sort_values("Rating", ascending=False)[["Bakery", "Rating"]], hide_index=True)
