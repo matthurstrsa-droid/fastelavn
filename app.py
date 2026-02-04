@@ -71,36 +71,22 @@ with st.sidebar:
                 try:
                     photo_url = ""
                     # UPLOAD TO DRIVE LOGIC
-                    if uploaded_file:
-                        file_metadata = {
-                            'name': f"{bakery_choice}_{final_flavor}.jpg",
-                            'parents': [FOLDER_ID]
-                        }
-                        media = MediaIoBaseUpload(io.BytesIO(uploaded_file.getvalue()), 
-                                                  mimetype='image/jpeg')
-                        uploaded_drive_file = drive_service.files().create(
-                            body=file_metadata, media_body=media, fields='id, webViewLink'
-                        ).execute()
-                        photo_url = uploaded_drive_file.get('webViewLink')
-
-                    b_info = df[df['Bakery Name'] == bakery_choice].iloc[0]
-                    
-                    # Appends row to Sheet (Column 11 is now the Photo URL)
-                    new_row = [
-                        bakery_choice, final_flavor, b_info.get('Price (DKK)', ''),
-                        b_info.get('Address', ''), float(b_info['lat']), float(b_info['lon']),
-                        b_info.get('Opening Hours', ''), b_info.get('Neighborhood', ''),
-                        "App User", user_score, photo_url 
-                    ]
-                    worksheet.append_row(new_row)
-                    st.success(f"Rated {bakery_choice}'s {final_flavor}!")
-                    st.balloons()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Upload error: {e}")
-    else:
-        st.warning("No data found.")
-
+                        if uploaded_file:
+                            file_metadata = {
+                                'name': f"{bakery_choice}_{final_flavor}.jpg",
+                                'parents': [FOLDER_ID]
+                            }
+                            media = MediaIoBaseUpload(io.BytesIO(uploaded_file.getvalue()), 
+                                                      mimetype='image/jpeg')
+                            
+                            # Add 'supportsAllDrives=True' to bypass common quota issues in shared folders
+                            uploaded_drive_file = drive_service.files().create(
+                                body=file_metadata, 
+                                media_body=media, 
+                                fields='id, webViewLink',
+                                supportsAllDrives=True  # Crucial for service accounts
+                            ).execute()
+                            photo_url = uploaded_drive_file.get('webViewLink')
 # --- 4. MAIN INTERFACE ---
 tab1, tab2 = st.tabs(["📍 Bakery Map", "🏆 Leaderboards"])
 
@@ -128,3 +114,4 @@ with tab2:
         flavor_stats = df.groupby(['Fastelavnsbolle Type', 'Bakery Name'])['Rating'].agg(['mean', 'count']).reset_index()
         flavor_stats.columns = ['Flavour', 'Bakery', 'Avg Rating', 'Reviews']
         st.dataframe(flavor_stats.sort_values(by="Avg Rating", ascending=False), hide_index=True, use_container_width=True)
+
