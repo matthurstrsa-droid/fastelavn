@@ -6,8 +6,8 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="Fastelavnsbolle Guide 2025", layout="wide")
-st.title("🥐 Your 2025 Fastelavnsbolle Guide")
+st.set_page_config(page_title="Fastelavnsbolle Guide 2026", layout="wide")
+st.title("🥐 Your 2026 Fastelavnsbolle Guide")
 
 # --- 1. CONNECT TO YOUR GOOGLE SHEET ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -50,4 +50,5 @@ st_folium(m, width="100%", height=500)
 # --- 4. DATA EXPLORER ---
 st.subheader("📊 Full Bun Inventory")
 st.dataframe(df[['Bakery Name', 'Fastelavnsbolle Type', 'Price (DKK)', 'Neighborhood']], use_container_width=True)
+
 
