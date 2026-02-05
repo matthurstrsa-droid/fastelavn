@@ -128,5 +128,18 @@ with t1:
         else: color, icon = "blue", "info-sign"
         
         folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
-    st_folium(m, width=1100, height=5
-             )
+    st_folium(m, width=1100, height=500, key="main_map")
+
+with t3:
+    if not stats.empty:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("🏆 Top Rated")
+            st.dataframe(stats.sort_values('Avg_Rating', ascending=False))
+        with c2:
+            st.subheader("💰 Best Value")
+            if best_value_bakery:
+                st.metric(best_value_bakery, f"{stats.loc[best_value_bakery, 'Avg_Rating']:.2f} Stars", 
+                          delta=f"{stats.loc[best_value_bakery, 'Avg_Price']:.0f} DKK Avg")
+    else:
+        st.info("No ratings found. Submit a review to see the leaderboard!")
