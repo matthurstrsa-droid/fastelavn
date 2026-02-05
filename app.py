@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 import folium
 from streamlit_folium import st_folium
 
-# --- 1. CONNECTION & INITIALIZATION ---
+# --- 1. SETUP & DATA LOADING ---
 st.set_page_config(page_title="Bakery Tracker", layout="wide")
 
 if "selected_bakery" not in st.session_state:
@@ -26,27 +26,27 @@ def get_worksheet():
 @st.cache_data(ttl=5)
 def load_bakery_df():
     ws = get_worksheet()
-    data = ws.get_all_records()
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(ws.get_all_records())
+    df.columns = [c.strip() for c in df.columns] # Clean headers
     
-    # Clean up column names (handles "Price " vs "Price")
-    df.columns = [c.strip() for c in df.columns]
-    
-    # Standardize data types
-    numeric_cols = ['Rating', 'Price', 'lat', 'lon']
-    for col in numeric_cols:
+    # Ensure columns exist and are numeric
+    for col in ['Rating', 'Price', 'lat', 'lon']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
         else:
             df[col] = 0.0
+    if 'Fastelavnsbolle Type' not in df.columns:
+        df['Fastelavnsbolle Type'] = ""
     return df
 
 df = load_bakery_df()
 df_clean = df.dropna(subset=['lat', 'lon']) if not df.empty else pd.DataFrame()
 
-# --- 2. CALCULATE STATS ---
-# Only include real ratings (ignore 0.0 and wishlist 0.1)
+# --- 2. STATS & LOGIC ---
 rated_only = df_clean[df_clean['Rating'] >= 1.0]
+stats = pd.DataFrame()
+best_value_bakery = None
+top_3 = []
 
 if not rated_only.empty:
     stats = rated_only.groupby('Bakery Name').agg({
@@ -55,57 +55,71 @@ if not rated_only.empty:
     })
     stats.columns = ['Avg_Rating', 'Rating_Count', 'Avg_Price']
     
-    # Calculate Best Value
-    value_eligible = stats[stats['Avg_Price'] > 0].copy()
-    if not value_eligible.empty:
-        # Higher score is better value
-        value_eligible['Value_Score'] = value_eligible['Avg_Rating'] / value_eligible['Avg_Price']
-        best_value_bakery = value_eligible['Value_Score'].idxmax()
-    else:
-        best_value_bakery = None
-    
+    val_eligible = stats[stats['Avg_Price'] > 0].copy()
+    if not val_eligible.empty:
+        val_eligible['Val'] = val_eligible['Avg_Rating'] / val_eligible['Avg_Price']
+        best_value_bakery = val_eligible['Val'].idxmax()
     top_3 = stats['Avg_Rating'].sort_values(ascending=False).head(3).index.tolist()
-else:
-    stats = pd.DataFrame()
-    best_value_bakery = None
-    top_3 = []
 
 bakery_max_rating = df_clean.groupby('Bakery Name')['Rating'].max().to_dict()
 
-# --- 3. SIDEBAR ---
+# --- 3. SIDEBAR (REBUILT) ---
 with st.sidebar:
     st.header("🥯 Control Panel")
     
-    with st.expander("🔍 Filters", expanded=True):
-        max_p = int(df_clean['Price'].max()) if not df_clean.empty else 100
-        p_range = st.slider("Price Range (DKK)", 0, max(100, max_p), (0, max(100, max_p)))
-        min_r = st.slider("Min Rating", 1.0, 5.0, 1.0, 0.25)
+    # --- FILTERS ---
+    with st.expander("🔍 Map Filters", expanded=True):
+        # Calculate safe max price
+        max_price_in_data = int(df_clean['Price'].max()) if not df_clean.empty else 100
+        upper_limit = max(100, max_price_in_data)
+        
+        price_range = st.slider("Price (DKK)", 0, upper_limit, (0, upper_limit))
+        min_rating = st.slider("Min Rating", 1.0, 5.0, 1.0, 0.25)
 
-    # Filter Logic
+    # --- FILTER LOGIC ---
     def is_visible(name):
-        if name not in stats.index: return True # Show unrated/wishlist
-        ar, ap = stats.loc[name, 'Avg_Rating'], stats.loc[name, 'Avg_Price']
-        return (ar >= min_r) and (p_range[0] <= ap <= p_range[1] if ap > 0 else True)
+        # If it has stats, apply filter. If not (wishlist/unrated), keep it visible.
+        if name in stats.index:
+            avg_r = stats.loc[name, 'Avg_Rating']
+            avg_p = stats.loc[name, 'Avg_Price']
+            # Only filter out if it fails the criteria
+            price_match = (price_range[0] <= avg_p <= price_range[1]) if avg_p > 0 else True
+            rating_match = (avg_r >= min_rating)
+            return price_match and rating_match
+        return True
 
     visible_names = [n for n in df_clean['Bakery Name'].unique() if is_visible(n)]
     display_df = df_clean[df_clean['Bakery Name'].isin(visible_names)]
 
-    # Actions
+    st.divider()
+
+    # --- BAKERY & FLAVOR SELECTION ---
     all_names = sorted(df_clean['Bakery Name'].unique().tolist())
     if all_names:
-        current_sel = st.session_state.selected_bakery
-        idx = all_names.index(current_sel) if current_sel in all_names else 0
+        sel_name = st.session_state.selected_bakery
+        idx = all_names.index(sel_name) if sel_name in all_names else 0
         chosen = st.selectbox("Select Bakery", all_names, index=idx)
         st.session_state.selected_bakery = chosen
         
-        # Rating / Wishlist Logic Here...
-    
-    st.divider()
-    with st.expander("🐞 Data Debugger"):
-        st.write("Columns:", list(df.columns))
-        st.write("Rated Bakeries:", len(stats))
-        if best_value_bakery:
-            st.success(f"Best Value: {best_value_bakery}")
+        b_rows = df_clean[df_clean['Bakery Name'] == chosen]
+        
+        # FLAVOR CHOICE (Restored)
+        flavs = sorted([str(f) for f in b_rows['Fastelavnsbolle Type'].unique() if f and str(f).strip()])
+        f_sel = st.selectbox("Flavor", flavs + ["➕ New..."], key=f"f_sel_{chosen}")
+        f_name = st.text_input("New flavor name:", key=f"f_in_{chosen}") if f_sel == "➕ New..." else f_sel
+
+        # ACTIONS
+        action = st.radio("Mode", ["Rate it", "Wishlist"])
+        if action == "Rate it":
+            s = st.slider("Rating", 1.0, 5.0, 4.0, 0.25, key=f"s_{chosen}")
+            p = st.number_input("Price", 0, 200, 45, key=f"p_{chosen}")
+            if st.button("Submit ✅", use_container_width=True):
+                get_worksheet().append_row([chosen, f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", s, p], value_input_option='USER_ENTERED')
+                st.cache_data.clear(); st.rerun()
+        else:
+            if st.button("Add to Wishlist ❤️", use_container_width=True):
+                get_worksheet().append_row([chosen, "Wishlist", "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0.1, 0], value_input_option='USER_ENTERED')
+                st.cache_data.clear(); st.rerun()
 
 # --- 4. MAIN UI ---
 st.title("🥐 Copenhagen Bakery Explorer")
@@ -117,18 +131,26 @@ with t1:
         row = display_df[display_df['Bakery Name'] == name].iloc[0]
         max_r = bakery_max_rating.get(name, 0)
         
-        # Color/Icon Priority
-        if name == best_value_bakery: 
-            color, icon = "orange", "usd" # Money bag/USD symbol
-        elif name in top_3: 
-            color = ["beige", "lightgray", "darkred"][top_3.index(name)]
-            icon = "star"
+        if name == best_value_bakery: color, icon = "orange", "usd"
+        elif name in top_3: color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
         elif max_r >= 1.0: color, icon = "green", "cutlery"
         elif 0.01 < max_r < 1.0: color, icon = "red", "heart"
         else: color, icon = "blue", "info-sign"
         
         folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
     st_folium(m, width=1100, height=500, key="main_map")
+
+with t2:
+    st.subheader("Progress Checklist")
+    # THE CHECKLIST (Restored)
+    check_data = []
+    for n in sorted(display_df['Bakery Name'].unique()):
+        r = bakery_max_rating.get(n, 0)
+        status = "✅ Tried" if r >= 1.0 else "❤️ Wishlist" if 0.01 < r < 1.0 else "⭕ To Visit"
+        revs = int(stats.loc[n, 'Rating_Count']) if n in stats.index else 0
+        check_data.append({"Bakery": n, "Status": status, "Reviews": revs})
+    
+    st.dataframe(pd.DataFrame(check_data), use_container_width=True, hide_index=True)
 
 with t3:
     if not stats.empty:
@@ -140,6 +162,4 @@ with t3:
             st.subheader("💰 Best Value")
             if best_value_bakery:
                 st.metric(best_value_bakery, f"{stats.loc[best_value_bakery, 'Avg_Rating']:.2f} Stars", 
-                          delta=f"{stats.loc[best_value_bakery, 'Avg_Price']:.0f} DKK Avg")
-    else:
-        st.info("No ratings found. Submit a review to see the leaderboard!")
+                          delta=f"{stats.loc[best_value_bakery, 'Avg_Price']:.0f} DKK")
