@@ -64,6 +64,7 @@ with st.sidebar:
         min_r = st.slider("Min Rating", 1.0, 5.0, 1.0, 0.25)
 
     def is_visible(name):
+        # NEW: Best Value bakery is ALWAYS visible
         if name == best_value_bakery: return True
         if name in stats.index:
             avg_r, avg_p = stats.loc[name, 'Avg_Rating'], stats.loc[name, 'Avg_Price']
@@ -83,34 +84,21 @@ with st.sidebar:
         st.session_state.selected_bakery = chosen
         
         b_rows = df_clean[df_clean['Bakery Name'] == chosen]
+        # FIX: Ensure we only get unique string labels for flavors
         raw_flavs = b_rows['Fastelavnsbolle Type'].unique()
-        flavs = sorted([str(f).strip() for f in raw_flavs if f and str(f).strip() and not str(f).isdigit() and str(f).lower() != "wishlist"])
+        flavs = sorted([str(f).strip() for f in raw_flavs if f and str(f).strip() and not str(f).isdigit()])
         
-        st.subheader("🍦 Flavors")
-        f_sel = st.selectbox("Existing Flavors", flavs + ["➕ Add New..."], key=f"f_sel_{chosen}")
-        
-        if f_sel == "➕ Add New...":
-            new_f_name = st.text_input("New flavor name:", key=f"f_in_{chosen}")
-            if st.button("✨ Add to List", use_container_width=True):
-                if new_f_name:
-                    get_worksheet().append_row([chosen, new_f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0, 0], value_input_option='USER_ENTERED')
-                    st.toast(f"Added {new_f_name}!")
-                    st.cache_data.clear(); st.rerun()
-            f_name = new_f_name
-        else:
-            f_name = f_sel
+        f_sel = st.selectbox("Flavor", flavs + ["➕ New..."], key=f"f_sel_{chosen}")
+        f_name = st.text_input("New flavor name:", key=f"f_in_{chosen}") if f_sel == "➕ New..." else f_sel
 
-        st.divider()
-        
-        mode = st.radio("Mode", ["Rate it", "Wishlist"], key=f"mode_{chosen}")
-        if mode == "Rate it":
+        if st.radio("Mode", ["Rate it", "Wishlist"]) == "Rate it":
             s = st.slider("Rating", 1.0, 5.0, 4.0, 0.25, key=f"s_{chosen}")
             p = st.number_input("Price", 0, 200, 45, key=f"p_{chosen}")
-            if st.button("Submit Rating ✅", use_container_width=True):
+            if st.button("Submit ✅"):
                 get_worksheet().append_row([chosen, f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", s, p], value_input_option='USER_ENTERED')
                 st.cache_data.clear(); st.rerun()
         else:
-            if st.button("Add to Wishlist ❤️", use_container_width=True):
+            if st.button("Add to Wishlist ❤️"):
                 get_worksheet().append_row([chosen, "Wishlist", "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0.1, 0], value_input_option='USER_ENTERED')
                 st.cache_data.clear(); st.rerun()
 
@@ -124,6 +112,7 @@ with t1:
         row = display_df[display_df['Bakery Name'] == name].iloc[0]
         max_r = bakery_max_rating.get(name, 0)
         
+        # Icon Priority Logic
         if name == best_value_bakery: color, icon = "orange", "usd"
         elif name in top_3: color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
         elif max_r >= 1.0: color, icon = "green", "cutlery"
@@ -132,64 +121,28 @@ with t1:
         
         folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
     
+    # --- THE SYNC BRIDGE ---
     map_output = st_folium(m, width=1100, height=500, key="main_map")
     
+    # Check if a marker was clicked
     if map_output and map_output.get("last_object_clicked_tooltip"):
         clicked_bakery = map_output["last_object_clicked_tooltip"]
+        
+        # Only rerun if the selection actually changed (prevents infinite loops)
         if clicked_bakery != st.session_state.selected_bakery:
             st.session_state.selected_bakery = clicked_bakery
             st.rerun()
 
 with t2:
-    st.subheader("Interactive Checklist")
-    # 1. Build the current state data
+    st.subheader("Progress Checklist")
+    # Dynamically build checklist from current visibility
     check_data = []
-    for n in sorted(df_clean['Bakery Name'].unique()):
+    for n in sorted(display_df['Bakery Name'].unique()):
         r = bakery_max_rating.get(n, 0)
         status = "✅ Tried" if r >= 1.0 else "❤️ Wishlist" if 0.01 < r < 1.0 else "⭕ To Visit"
-        check_data.append({"Bakery Name": n, "Status": status})
-    
-    checklist_df = pd.DataFrame(check_data)
-    
-    # 2. Display with Data Editor
-    edited_df = st.data_editor(
-        checklist_df,
-        column_config={
-            "Status": st.column_config.SelectboxColumn(
-                "Status",
-                help="Change the status of this bakery",
-                options=["✅ Tried", "❤️ Wishlist", "⭕ To Visit"],
-                required=True,
-            )
-        },
-        disabled=["Bakery Name"], # Keep bakery names fixed
-        hide_index=True,
-        use_container_width=True
-    )
-
-    # 3. Handle Changes
-    if st.button("💾 Save Checklist Changes"):
-        ws = get_worksheet()
-        # Find rows that changed
-        for i, row in edited_df.iterrows():
-            if row["Status"] != checklist_df.iloc[i]["Status"]:
-                bakery = row["Bakery Name"]
-                new_status = row["Status"]
-                
-                # Logic: If changing to Wishlist, add a wishlist row. 
-                # If changing to 'To Visit', we could delete ratings (optional - here we just add a row)
-                if new_status == "❤️ Wishlist":
-                    # Get info from first occurrence
-                    base = df_clean[df_clean['Bakery Name'] == bakery].iloc[0]
-                    ws.append_row([bakery, "Wishlist", "", base['Address'], base['lat'], base['lon'], "", "Other", "User", 0.1, 0], value_input_option='USER_ENTERED')
-                elif new_status == "⭕ To Visit":
-                     # To 'reset', we'd normally delete rows, but for simplicity, we add a 0 rating row
-                     base = df_clean[df_clean['Bakery Name'] == bakery].iloc[0]
-                     ws.append_row([bakery, "Reset", "", base['Address'], base['lat'], base['lon'], "", "Other", "User", 0.0, 0], value_input_option='USER_ENTERED')
-        
-        st.success("Changes saved to Google Sheets!")
-        st.cache_data.clear()
-        st.rerun()
+        revs = int(stats.loc[n, 'Rating_Count']) if n in stats.index else 0
+        check_data.append({"Bakery": n, "Status": status, "Reviews": revs})
+    st.dataframe(pd.DataFrame(check_data), use_container_width=True, hide_index=True)
 
 with t3:
     if not stats.empty:
