@@ -84,10 +84,8 @@ with st.sidebar:
         
         b_rows = df_clean[df_clean['Bakery Name'] == chosen]
         raw_flavs = b_rows['Fastelavnsbolle Type'].unique()
-        # Filter out "Wishlist" from flavor list
         flavs = sorted([str(f).strip() for f in raw_flavs if f and str(f).strip() and not str(f).isdigit() and str(f).lower() != "wishlist"])
         
-        # --- NEW FLAVOR ADDITION UI ---
         st.subheader("🍦 Flavors")
         f_sel = st.selectbox("Existing Flavors", flavs + ["➕ Add New..."], key=f"f_sel_{chosen}")
         
@@ -95,7 +93,6 @@ with st.sidebar:
             new_f_name = st.text_input("New flavor name:", key=f"f_in_{chosen}")
             if st.button("✨ Add to List", use_container_width=True):
                 if new_f_name:
-                    # Append a placeholder row to Google Sheets to save this flavor
                     get_worksheet().append_row([chosen, new_f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0, 0], value_input_option='USER_ENTERED')
                     st.toast(f"Added {new_f_name}!")
                     st.cache_data.clear(); st.rerun()
@@ -105,7 +102,6 @@ with st.sidebar:
 
         st.divider()
         
-        # --- RATING / WISHLIST UI ---
         mode = st.radio("Mode", ["Rate it", "Wishlist"], key=f"mode_{chosen}")
         if mode == "Rate it":
             s = st.slider("Rating", 1.0, 5.0, 4.0, 0.25, key=f"s_{chosen}")
@@ -145,14 +141,55 @@ with t1:
             st.rerun()
 
 with t2:
-    st.subheader("Progress Checklist")
+    st.subheader("Interactive Checklist")
+    # 1. Build the current state data
     check_data = []
-    for n in sorted(display_df['Bakery Name'].unique()):
+    for n in sorted(df_clean['Bakery Name'].unique()):
         r = bakery_max_rating.get(n, 0)
         status = "✅ Tried" if r >= 1.0 else "❤️ Wishlist" if 0.01 < r < 1.0 else "⭕ To Visit"
-        revs = int(stats.loc[n, 'Rating_Count']) if n in stats.index else 0
-        check_data.append({"Bakery": n, "Status": status, "Reviews": revs})
-    st.dataframe(pd.DataFrame(check_data), use_container_width=True, hide_index=True)
+        check_data.append({"Bakery Name": n, "Status": status})
+    
+    checklist_df = pd.DataFrame(check_data)
+    
+    # 2. Display with Data Editor
+    edited_df = st.data_editor(
+        checklist_df,
+        column_config={
+            "Status": st.column_config.SelectboxColumn(
+                "Status",
+                help="Change the status of this bakery",
+                options=["✅ Tried", "❤️ Wishlist", "⭕ To Visit"],
+                required=True,
+            )
+        },
+        disabled=["Bakery Name"], # Keep bakery names fixed
+        hide_index=True,
+        use_container_width=True
+    )
+
+    # 3. Handle Changes
+    if st.button("💾 Save Checklist Changes"):
+        ws = get_worksheet()
+        # Find rows that changed
+        for i, row in edited_df.iterrows():
+            if row["Status"] != checklist_df.iloc[i]["Status"]:
+                bakery = row["Bakery Name"]
+                new_status = row["Status"]
+                
+                # Logic: If changing to Wishlist, add a wishlist row. 
+                # If changing to 'To Visit', we could delete ratings (optional - here we just add a row)
+                if new_status == "❤️ Wishlist":
+                    # Get info from first occurrence
+                    base = df_clean[df_clean['Bakery Name'] == bakery].iloc[0]
+                    ws.append_row([bakery, "Wishlist", "", base['Address'], base['lat'], base['lon'], "", "Other", "User", 0.1, 0], value_input_option='USER_ENTERED')
+                elif new_status == "⭕ To Visit":
+                     # To 'reset', we'd normally delete rows, but for simplicity, we add a 0 rating row
+                     base = df_clean[df_clean['Bakery Name'] == bakery].iloc[0]
+                     ws.append_row([bakery, "Reset", "", base['Address'], base['lat'], base['lon'], "", "Other", "User", 0.0, 0], value_input_option='USER_ENTERED')
+        
+        st.success("Changes saved to Google Sheets!")
+        st.cache_data.clear()
+        st.rerun()
 
 with t3:
     if not stats.empty:
