@@ -129,3 +129,4 @@ with t1:
         
         folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
     st_folium(m, width=1100, height=5
+             )
