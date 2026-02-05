@@ -64,7 +64,6 @@ with st.sidebar:
         min_r = st.slider("Min Rating", 1.0, 5.0, 1.0, 0.25)
 
     def is_visible(name):
-        # NEW: Best Value bakery is ALWAYS visible
         if name == best_value_bakery: return True
         if name in stats.index:
             avg_r, avg_p = stats.loc[name, 'Avg_Rating'], stats.loc[name, 'Avg_Price']
@@ -84,23 +83,40 @@ with st.sidebar:
         st.session_state.selected_bakery = chosen
         
         b_rows = df_clean[df_clean['Bakery Name'] == chosen]
-        # FIX: Ensure we only get unique string labels for flavors
         raw_flavs = b_rows['Fastelavnsbolle Type'].unique()
-        flavs = sorted([str(f).strip() for f in raw_flavs if f and str(f).strip() and not str(f).isdigit()])
+        flavs = sorted([str(f).strip() for f in raw_flavs if f and str(f).strip() and not str(f).isdigit() and str(f) != "Wishlist"])
         
         f_sel = st.selectbox("Flavor", flavs + ["➕ New..."], key=f"f_sel_{chosen}")
         f_name = st.text_input("New flavor name:", key=f"f_in_{chosen}") if f_sel == "➕ New..." else f_sel
 
-        if st.radio("Mode", ["Rate it", "Wishlist"]) == "Rate it":
+        # MODE SELECTOR
+        mode = st.radio("Mode", ["Rate it", "Wishlist"], key=f"mode_{chosen}")
+        
+        if mode == "Rate it":
             s = st.slider("Rating", 1.0, 5.0, 4.0, 0.25, key=f"s_{chosen}")
             p = st.number_input("Price", 0, 200, 45, key=f"p_{chosen}")
             if st.button("Submit ✅"):
                 get_worksheet().append_row([chosen, f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", s, p], value_input_option='USER_ENTERED')
                 st.cache_data.clear(); st.rerun()
         else:
-            if st.button("Add to Wishlist ❤️"):
-                get_worksheet().append_row([chosen, "Wishlist", "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0.1, 0], value_input_option='USER_ENTERED')
-                st.cache_data.clear(); st.rerun()
+            # Check if this bakery is currently on the Wishlist
+            is_on_wishlist = "Wishlist" in raw_flavs
+            
+            if not is_on_wishlist:
+                if st.button("Add to Wishlist ❤️"):
+                    get_worksheet().append_row([chosen, "Wishlist", "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0.1, 0], value_input_option='USER_ENTERED')
+                    st.cache_data.clear(); st.rerun()
+            else:
+                # NEW: Remove from Wishlist Logic
+                if st.button("Remove from Wishlist ❌"):
+                    ws = get_worksheet()
+                    all_data = ws.get_all_records()
+                    # Find the specific row index (gspread is 1-indexed, +1 for header)
+                    for i, row in enumerate(all_data):
+                        if row.get("Bakery Name") == chosen and row.get("Fastelavnsbolle Type") == "Wishlist":
+                            ws.delete_rows(i + 2) 
+                            break
+                    st.cache_data.clear(); st.rerun()
 
 # --- 4. MAIN UI ---
 st.title("🥐 Copenhagen Bakery Explorer")
@@ -112,7 +128,6 @@ with t1:
         row = display_df[display_df['Bakery Name'] == name].iloc[0]
         max_r = bakery_max_rating.get(name, 0)
         
-        # Icon Priority Logic
         if name == best_value_bakery: color, icon = "orange", "usd"
         elif name in top_3: color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
         elif max_r >= 1.0: color, icon = "green", "cutlery"
@@ -121,21 +136,16 @@ with t1:
         
         folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
     
-    # --- THE SYNC BRIDGE ---
     map_output = st_folium(m, width=1100, height=500, key="main_map")
     
-    # Check if a marker was clicked
     if map_output and map_output.get("last_object_clicked_tooltip"):
         clicked_bakery = map_output["last_object_clicked_tooltip"]
-        
-        # Only rerun if the selection actually changed (prevents infinite loops)
         if clicked_bakery != st.session_state.selected_bakery:
             st.session_state.selected_bakery = clicked_bakery
             st.rerun()
 
 with t2:
     st.subheader("Progress Checklist")
-    # Dynamically build checklist from current visibility
     check_data = []
     for n in sorted(display_df['Bakery Name'].unique()):
         r = bakery_max_rating.get(n, 0)
