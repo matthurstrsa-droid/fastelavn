@@ -4,24 +4,28 @@ import gspread
 from google.oauth2.service_account import Credentials
 import folium
 from streamlit_folium import st_folium
+import time
 
-# --- 1. OPTIMIZED CONNECTION & CACHING ---
+# --- 1. SETUP & CONNECTION ---
 st.set_page_config(page_title="Bakery Tracker", layout="wide")
 
 if "selected_bakery" not in st.session_state:
     st.session_state.selected_bakery = None
 
 @st.cache_resource
-def get_gs_client():
+def get_gs_worksheet():
     creds_info = st.secrets["connections"]["my_bakery_db"]
     creds = Credentials.from_service_account_info(creds_info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    return gspread.authorize(creds)
-
-@st.cache_data(ttl=60) # Faster response, data refreshes every minute
-def load_bakery_df():
-    client = get_gs_client()
+    client = gspread.authorize(creds)
     sh = client.open_by_key("1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo")
-    df = pd.DataFrame(sh.get_worksheet(0).get_all_records())
+    return sh.get_worksheet(0)
+
+ws = get_gs_worksheet()
+
+@st.cache_data(ttl=60)
+def load_bakery_df():
+    data = ws.get_all_records()
+    df = pd.DataFrame(data)
     df.columns = [c.strip() for c in df.columns]
     for col in ['Rating', 'Price', 'lat', 'lon']:
         if col in df.columns:
@@ -31,7 +35,7 @@ def load_bakery_df():
 df = load_bakery_df()
 df_clean = df.dropna(subset=['lat', 'lon']) if not df.empty else pd.DataFrame()
 
-# --- 2. STATS LOGIC (Your Proven Version) ---
+# --- 2. STATS LOGIC ---
 rated_only = df_clean[df_clean['Rating'] >= 1.0]
 stats = pd.DataFrame()
 best_value_bakery = None
@@ -48,7 +52,7 @@ if not rated_only.empty:
 
 bakery_max_rating = df_clean.groupby('Bakery Name')['Rating'].max().to_dict()
 
-# --- 3. SIDEBAR (Restored UI) ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.header("🥯 Control Panel")
     
@@ -61,8 +65,7 @@ with st.sidebar:
         if name == best_value_bakery: return True
         if name in stats.index:
             avg_r, avg_p = stats.loc[name, 'Avg_Rating'], stats.loc[name, 'Avg_Price']
-            p_ok = (p_range[0] <= avg_p <= p_range[1]) if avg_p > 0 else True
-            return (avg_r >= min_r) and p_ok
+            return (avg_r >= min_r) and ((p_range[0] <= avg_p <= p_range[1]) if avg_p > 0 else True)
         return True
 
     visible_names = [n for n in df_clean['Bakery Name'].unique() if is_visible(n)]
@@ -84,18 +87,27 @@ with st.sidebar:
         f_name = st.text_input("New flavor name:", key=f"f_in_{chosen}") if f_sel == "➕ New..." else f_sel
 
         mode = st.radio("Mode", ["Rate it", "Wishlist"])
+        
         if mode == "Rate it":
             s = st.slider("Rating", 1.0, 5.0, 4.0, 0.25, key=f"s_{chosen}")
             p = st.number_input("Price", 0, 200, 45, key=f"p_{chosen}")
             if st.button("Submit ✅", use_container_width=True):
-                get_worksheet().append_row([chosen, f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", s, p], value_input_option='USER_ENTERED')
-                st.cache_data.clear(); st.rerun()
+                new_row = [chosen, f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", s, p]
+                ws.append_row(new_row, value_input_option='USER_ENTERED')
+                st.toast(f"Success! Rated {chosen} ⭐{s}", icon='🥯')
+                st.cache_data.clear()
+                time.sleep(1) # Brief pause so they see the toast
+                st.rerun()
         else:
             if st.button("Add to Wishlist ❤️", use_container_width=True):
-                get_worksheet().append_row([chosen, "Wishlist", "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0.1, 0], value_input_option='USER_ENTERED')
-                st.cache_data.clear(); st.rerun()
+                wish_row = [chosen, "Wishlist", "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0.1, 0]
+                ws.append_row(wish_row, value_input_option='USER_ENTERED')
+                st.toast(f"Added {chosen} to Wishlist!", icon='❤️')
+                st.cache_data.clear()
+                time.sleep(1)
+                st.rerun()
 
-# --- 4. MAIN UI (Restored Tabs) ---
+# --- 4. MAIN UI ---
 st.title("🥐 Copenhagen Bakery Explorer")
 t1, t2, t3 = st.tabs(["📍 Map", "📝 Checklist", "🏆 Podium"])
 
