@@ -164,30 +164,38 @@ t1, t2, t3 = st.tabs(["📍 Map", "📝 Checklist", "🏆 Podium"])
 with t1:
     if not display_df.empty:
         m = folium.Map(location=[55.6761, 12.5683], zoom_start=13)
-        
-        # SEARCH PLUGIN: Adds a search icon to the top left of the map
         Geocoder().add_to(m)
 
         for name in display_df['Bakery Name'].unique():
-            row = display_df[display_df['Bakery Name'] == name].iloc[0]
-            max_r = bakery_max_rating.get(name, 0)
+            # Get all entries for THIS specific bakery
+            b_data = display_df[display_df['Bakery Name'] == name]
+            row = b_data.iloc[0]
             
-            if name == st.session_state.selected_bakery: color, icon = "darkblue", "flag"
-            elif name == best_value_bakery: color, icon = "orange", "usd"
-            elif name in top_3: color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
-            elif max_r >= 1.0: color, icon = "green", "cutlery"
-            elif 0.01 < max_r < 1.0: color, icon = "red", "heart"
-            else: color, icon = "blue", "info-sign"
+            # 1. Check if it's actually on the wishlist (the "Wishlist" flavor exists)
+            on_wishlist = "Wishlist" in b_data['Fastelavnsbolle Type'].values
             
-            folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
-        
-        map_output = st_folium(m, width=1100, height=500, key="main_map")
-        if map_output and map_output.get("last_object_clicked_tooltip"):
-            clicked = map_output["last_object_clicked_tooltip"]
-            if clicked != st.session_state.selected_bakery:
-                st.session_state.selected_bakery = clicked
-                st.rerun()
-    else:
+            # 2. Check if it has any REAL ratings (Rating >= 1.0)
+            has_rating = any(b_data['Rating'] >= 1.0)
+            
+            # --- UPDATED ICON PRIORITY ---
+            if name == st.session_state.selected_bakery: 
+                color, icon = "darkblue", "flag"
+            elif name == best_value_bakery: 
+                color, icon = "orange", "usd"
+            elif name in top_3: 
+                color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
+            elif has_rating: 
+                color, icon = "green", "cutlery" # It's been tried
+            elif on_wishlist: 
+                color, icon = "red", "heart"    # It's a wishlist item
+            else: 
+                color, icon = "blue", "info-sign" # It's just a pin on the map
+            
+            folium.Marker(
+                [row['lat'], row['lon']], 
+                tooltip=name, 
+                icon=folium.Icon(color=color, icon=icon)
+            ).add_to(m)
         st.warning("Adjust filters to see bakeries on the map.")
 
 # (Checklist and Podium code remains exactly as before)
@@ -213,3 +221,4 @@ with t3:
             if best_value_bakery:
                 st.metric(best_value_bakery, f"{stats.loc[best_value_bakery, 'Avg_Rating']:.2f} Stars", 
                           delta=f"{stats.loc[best_value_bakery, 'Avg_Price']:.0f} DKK")
+
