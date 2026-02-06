@@ -4,6 +4,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 import folium
 from streamlit_folium import st_folium
+from folium.plugins import Search, Geocoder # New for searching
+from geopy.geocoders import Nominatim # New for address lookup
 
 # --- 1. SETUP & CONNECTION ---
 st.set_page_config(page_title="Bakery Tracker", layout="wide")
@@ -63,9 +65,28 @@ bakery_max_rating = df_clean.groupby('Bakery Name')['Rating'].max().to_dict() if
 with st.sidebar:
     st.header("🥯 Control Panel")
     
-    if df_clean.empty:
-        st.info("Loading bakery data...")
-    else:
+    # NEW FUNCTIONALITY: ADD NEW BAKERY
+    with st.expander("🆕 Add New Bakery"):
+        new_name = st.text_input("Bakery Name")
+        new_addr = st.text_input("Address (e.g. Jægersborggade 4, Copenhagen)")
+        if st.button("📍 Find & Add Bakery"):
+            if new_name and new_addr:
+                geolocator = Nominatim(user_agent="bakery_explorer")
+                location = geolocator.geocode(new_addr)
+                if location:
+                    with st.spinner("Adding to Sheet..."):
+                        get_worksheet().append_row([
+                            new_name, "Wishlist", "", new_addr, 
+                            location.latitude, location.longitude, 
+                            "", "Other", "User", 0.1, 0
+                        ], value_input_option='USER_ENTERED')
+                        st.cache_data.clear()
+                        st.success(f"Added {new_name}!")
+                        st.rerun()
+                else:
+                    st.error("Could not find that address. Try adding 'Copenhagen' to the search.")
+
+    if not df_clean.empty:
         with st.expander("🔍 Map Filters"):
             max_p = int(df_clean['Price'].max())
             p_range = st.slider("Price (DKK)", 0, max(100, max_p), (0, max(100, max_p)))
@@ -94,7 +115,6 @@ with st.sidebar:
         raw_flavs = b_rows['Fastelavnsbolle Type'].unique()
         flavs = sorted([str(f).strip() for f in raw_flavs if f and str(f).strip() and not str(f).isdigit() and str(f) != "Wishlist"])
         
-        # FLAVOR ADDITION
         st.subheader("🍦 Flavors")
         f_sel = st.selectbox("Select Flavor", flavs + ["➕ New..."], key=f"f_sel_{chosen}")
         
@@ -120,7 +140,6 @@ with st.sidebar:
                     get_worksheet().append_row([chosen, f_name, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", s, p], value_input_option='USER_ENTERED')
                     st.cache_data.clear(); st.rerun()
         else:
-            # WISHLIST TOGGLE
             is_on_wishlist = "Wishlist" in raw_flavs
             if is_on_wishlist:
                 if st.button("Remove from Wishlist ❌", use_container_width=True):
@@ -145,11 +164,14 @@ t1, t2, t3 = st.tabs(["📍 Map", "📝 Checklist", "🏆 Podium"])
 with t1:
     if not display_df.empty:
         m = folium.Map(location=[55.6761, 12.5683], zoom_start=13)
+        
+        # SEARCH PLUGIN: Adds a search icon to the top left of the map
+        Geocoder().add_to(m)
+
         for name in display_df['Bakery Name'].unique():
             row = display_df[display_df['Bakery Name'] == name].iloc[0]
             max_r = bakery_max_rating.get(name, 0)
             
-            # HIGHLIGHT LOGIC
             if name == st.session_state.selected_bakery: color, icon = "darkblue", "flag"
             elif name == best_value_bakery: color, icon = "orange", "usd"
             elif name in top_3: color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
@@ -168,6 +190,7 @@ with t1:
     else:
         st.warning("Adjust filters to see bakeries on the map.")
 
+# (Checklist and Podium code remains exactly as before)
 with t2:
     if not display_df.empty:
         st.subheader("Progress Checklist")
