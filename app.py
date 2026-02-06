@@ -4,8 +4,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import Search, Geocoder # New for searching
-from geopy.geocoders import Nominatim # New for address lookup
+from folium.plugins import Geocoder
+from geopy.geocoders import Nominatim
 
 # --- 1. SETUP & CONNECTION ---
 st.set_page_config(page_title="Bakery Tracker", layout="wide")
@@ -27,7 +27,7 @@ def get_worksheet():
     sh = st.session_state.gs_client.open_by_key("1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo")
     return sh.get_worksheet(0)
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=2) # Lowered TTL for faster icon updates
 def load_bakery_df():
     try:
         ws = get_worksheet()
@@ -65,11 +65,11 @@ bakery_max_rating = df_clean.groupby('Bakery Name')['Rating'].max().to_dict() if
 with st.sidebar:
     st.header("🥯 Control Panel")
     
-    # NEW FUNCTIONALITY: ADD NEW BAKERY
+    # NEW: ADD NEW BAKERY
     with st.expander("🆕 Add New Bakery"):
         new_name = st.text_input("Bakery Name")
         new_addr = st.text_input("Address (e.g. Jægersborggade 4, Copenhagen)")
-        if st.button("📍 Find & Add Bakery"):
+        if st.button("📍 Find & Add Bakery", use_container_width=True):
             if new_name and new_addr:
                 geolocator = Nominatim(user_agent="bakery_explorer")
                 location = geolocator.geocode(new_addr)
@@ -84,7 +84,7 @@ with st.sidebar:
                         st.success(f"Added {new_name}!")
                         st.rerun()
                 else:
-                    st.error("Could not find that address. Try adding 'Copenhagen' to the search.")
+                    st.error("Address not found. Add 'Copenhagen' to search.")
 
     if not df_clean.empty:
         with st.expander("🔍 Map Filters"):
@@ -120,9 +120,9 @@ with st.sidebar:
         
         if f_sel == "➕ New...":
             f_name_input = st.text_input("New flavor name:", key=f"f_in_{chosen}")
-            if st.button("✨ Add Flavor to List", use_container_width=True):
+            if st.button("✨ Add Flavor to List"):
                 if f_name_input:
-                    with st.spinner("Saving flavor..."):
+                    with st.spinner("Saving..."):
                         get_worksheet().append_row([chosen, f_name_input, "", b_rows.iloc[0]['Address'], b_rows.iloc[0]['lat'], b_rows.iloc[0]['lon'], "", "Other", "User", 0.0, 0], value_input_option='USER_ENTERED')
                         st.cache_data.clear(); st.rerun()
             f_name = f_name_input
@@ -167,45 +167,41 @@ with t1:
         Geocoder().add_to(m)
 
         for name in display_df['Bakery Name'].unique():
-            # Get all entries for THIS specific bakery
             b_data = display_df[display_df['Bakery Name'] == name]
             row = b_data.iloc[0]
             
-            # 1. Check if it's actually on the wishlist (the "Wishlist" flavor exists)
+            # Icon Sync Logic
             on_wishlist = "Wishlist" in b_data['Fastelavnsbolle Type'].values
-            
-            # 2. Check if it has any REAL ratings (Rating >= 1.0)
             has_rating = any(b_data['Rating'] >= 1.0)
             
-            # --- UPDATED ICON PRIORITY ---
-            if name == st.session_state.selected_bakery: 
-                color, icon = "darkblue", "flag"
-            elif name == best_value_bakery: 
-                color, icon = "orange", "usd"
-            elif name in top_3: 
-                color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
-            elif has_rating: 
-                color, icon = "green", "cutlery" # It's been tried
-            elif on_wishlist: 
-                color, icon = "red", "heart"    # It's a wishlist item
-            else: 
-                color, icon = "blue", "info-sign" # It's just a pin on the map
+            if name == st.session_state.selected_bakery: color, icon = "darkblue", "flag"
+            elif name == best_value_bakery: color, icon = "orange", "usd"
+            elif name in top_3: color, icon = ["beige", "lightgray", "darkred"][top_3.index(name)], "star"
+            elif has_rating: color, icon = "green", "cutlery"
+            elif on_wishlist: color, icon = "red", "heart"
+            else: color, icon = "blue", "info-sign"
             
-            folium.Marker(
-                [row['lat'], row['lon']], 
-                tooltip=name, 
-                icon=folium.Icon(color=color, icon=icon)
-            ).add_to(m)
-        st.warning("Adjust filters to see bakeries on the map.")
+            folium.Marker([row['lat'], row['lon']], tooltip=name, icon=folium.Icon(color=color, icon=icon)).add_to(m)
+        
+        map_output = st_folium(m, width=1100, height=500, key="main_map")
+        if map_output and map_output.get("last_object_clicked_tooltip"):
+            clicked = map_output["last_object_clicked_tooltip"]
+            if clicked != st.session_state.selected_bakery:
+                st.session_state.selected_bakery = clicked
+                st.rerun()
+    else:
+        st.warning("No bakeries match current filters.")
 
-# (Checklist and Podium code remains exactly as before)
 with t2:
     if not display_df.empty:
         st.subheader("Progress Checklist")
         check_data = []
         for n in sorted(display_df['Bakery Name'].unique()):
-            r = bakery_max_rating.get(n, 0)
-            status = "✅ Tried" if r >= 1.0 else "❤️ Wishlist" if 0.01 < r < 1.0 else "⭕ To Visit"
+            b_data = display_df[display_df['Bakery Name'] == n]
+            r_max = b_data['Rating'].max()
+            on_wishlist = "Wishlist" in b_data['Fastelavnsbolle Type'].values
+            
+            status = "✅ Tried" if r_max >= 1.0 else "❤️ Wishlist" if on_wishlist else "⭕ To Visit"
             revs = int(stats.loc[n, 'Rating_Count']) if n in stats.index else 0
             check_data.append({"Bakery": n, "Status": status, "Reviews": revs})
         st.dataframe(pd.DataFrame(check_data), use_container_width=True, hide_index=True)
@@ -221,4 +217,3 @@ with t3:
             if best_value_bakery:
                 st.metric(best_value_bakery, f"{stats.loc[best_value_bakery, 'Avg_Rating']:.2f} Stars", 
                           delta=f"{stats.loc[best_value_bakery, 'Avg_Price']:.0f} DKK")
-
