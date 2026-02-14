@@ -9,17 +9,18 @@ from datetime import datetime
 import pytz
 import random
 import time
+import cloudinary.uploader
 
-# --- 1. CONFIG & SYSTEM ---
+# --- 1. CONFIG & SESSION ---
 st.set_page_config(page_title="BolleQuest Pro", layout="wide", initial_sidebar_state="collapsed")
 
 def get_now_dk():
     return datetime.now(pytz.timezone('Europe/Copenhagen')).strftime("%H:%M")
 
-if "selected_bakery" not in st.session_state:
-    st.session_state.selected_bakery = None
-if "merchant_bakery" not in st.session_state:
-    st.session_state.merchant_bakery = None
+# Initialize Session States
+if "selected_bakery" not in st.session_state: st.session_state.selected_bakery = None
+if "merchant_bakery" not in st.session_state: st.session_state.merchant_bakery = None
+if "user_nickname" not in st.session_state: st.session_state.user_nickname = "Guest"
 
 # --- 2. DATA CONNECTION ---
 @st.cache_resource
@@ -28,134 +29,121 @@ def get_gs_client():
     return gspread.authorize(Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
 
 def get_worksheet():
-    try:
-        return get_gs_client().open_by_key("1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo").get_worksheet(0)
-    except:
-        st.error("🚫 Google Sheets Access Denied. Check Share settings!")
-        st.stop()
+    return get_gs_client().open_by_key("1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo").get_worksheet(0)
 
 @st.cache_data(ttl=2)
 def load_data():
     df = pd.DataFrame(get_worksheet().get_all_records())
     df.columns = [c.strip() for c in df.columns]
-    num_cols = ['lat', 'lon', 'Rating', 'Price', 'Stock']
-    for col in num_cols:
+    for col in ['lat', 'lon', 'Rating', 'Price', 'Stock']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # Calculate Value Score
+    df['Value Score'] = df.apply(lambda r: (r['Rating'] / r['Price'] * 100) if r['Price'] > 0 and r['Rating'] > 0 else 0, axis=1)
     return df
 
-df_clean = load_data()
+df_raw = load_data()
 
-# --- 3. HEADER & SEARCH ---
+# --- 3. SIDEBAR FILTERS ---
+with st.sidebar:
+    st.title("🎯 Filter Quest")
+    max_p = st.slider("Max Price (DKK)", 0, 100, 75)
+    min_r = st.slider("Min Rating", 0.0, 5.0, 0.0, 0.5)
+    only_stock = st.checkbox("In Stock Only", value=False)
+    st.divider()
+    st.caption(f"Logged in as: {st.session_state.user_nickname}")
+    if st.session_state.merchant_bakery:
+        st.success(f"Merchant: {st.session_state.merchant_bakery}")
+
+# Apply Logic
+filtered = df_raw.copy()
+filtered = filtered[(filtered['Price'] <= max_p) & (filtered['Rating'] >= min_r)]
+if only_stock: filtered = filtered[filtered['Stock'] > 0]
+
+# --- 4. SEARCH & ACTION CENTER ---
 st.title("🥯 BolleQuest")
-search_q = st.text_input("🔍 Search flavor, bakery, or comments...", placeholder="e.g. 'Vegan'").strip().lower()
+search = st.text_input("🔍 Search flavor or bakery...", "").lower()
+if search:
+    filtered = filtered[filtered['Bakery Name'].str.lower().str.contains(search) | 
+                        filtered['Fastelavnsbolle Type'].str.lower().str.contains(search) |
+                        filtered['Comment'].str.lower().str.contains(search)]
 
-filtered = df_clean.copy()
-if search_q:
-    mask = (filtered['Fastelavnsbolle Type'].str.lower().str.contains(search_q, na=False) | 
-            filtered['Bakery Name'].str.lower().str.contains(search_q, na=False) |
-            filtered['Comment'].str.lower().str.contains(search_q, na=False))
-    filtered = filtered[mask]
-
-# --- 4. ACTION CENTER (Popover Logic) ---
 if st.session_state.selected_bakery:
     name = st.session_state.selected_bakery
-    b_rows = df_clean[df_clean['Bakery Name'] == name]
-    if not b_rows.empty:
-        row = b_rows.iloc[0]
-        with st.popover(f"📍 {name}", use_container_width=True):
-            stock = int(row['Stock'])
-            
-            c1, c2 = st.columns(2)
-            c1.metric("Stock", "SOLD OUT" if stock <= 0 else f"{stock} left")
-            c2.metric("Updated", row.get('Last Updated', '--:--'))
-            
-            # --- POST TO STREAM SECTION ---
-            st.write("**🚀 Post to Stream**")
-            t_flav = st.text_input("Flavor", value=row['Fastelavnsbolle Type'])
-            t_comm = st.text_area("Comment", placeholder="Queue length? Flavor vibes?", max_chars=280)
-            t_rate = st.select_slider("Rating", options=[1, 2, 3, 4, 5], value=4)
-            
-            if st.button("Post 🚀", use_container_width=True, type="primary"):
-                get_worksheet().append_row([
-                    name, t_flav, "", row['Address'], row['lat'], row['lon'],
-                    datetime.now().strftime("%Y-%m-%d"), "User", "Guest",
-                    t_rate, 45, stock, get_now_dk(), row.get('Bakery Key', ''), t_comm
-                ], value_input_option='USER_ENTERED')
-                st.toast("Posted!")
-                st.cache_data.clear(); time.sleep(1); st.rerun()
+    row = df_raw[df_raw['Bakery Name'] == name].iloc[0]
+    with st.popover(f"📍 {name}", use_container_width=True):
+        if st.session_state.merchant_bakery == name:
+            st.subheader("🧑‍🍳 Merchant Update")
+            ns = st.number_input("New Stock Count", 0, 500, int(row['Stock']))
+            if st.button("Save Stock"):
+                ws = get_worksheet()
+                c = ws.find(name)
+                ws.update_cell(c.row, 12, ns) # Stock
+                ws.update_cell(c.row, 13, get_now_dk()) # Time
+                st.cache_data.clear(); st.rerun()
+        
+        st.write("**📸 Check-in**")
+        img = st.file_uploader("Add Photo", type=['jpg','png'])
+        t_f = st.text_input("Flavor", value=row['Fastelavnsbolle Type'])
+        t_c = st.text_area("Comment", max_chars=280)
+        t_r = st.select_slider("Rating", options=[1,2,3,4,5], value=4)
+        
+        if st.button("Post 🚀", use_container_width=True, type="primary"):
+            i_url = cloudinary.uploader.upload(img)['secure_url'] if img else ""
+            cat = "Merchant" if st.session_state.merchant_bakery == name else "User Report"
+            get_worksheet().append_row([
+                name, t_f, i_url, row['Address'], row['lat'], row['lon'],
+                datetime.now().strftime("%Y-%m-%d"), cat, st.session_state.user_nickname,
+                t_r, row['Price'], row['Stock'], get_now_dk(), row.get('Bakery Key',''), t_c
+            ], value_input_option='USER_ENTERED')
+            st.cache_data.clear(); st.rerun()
 
-            if st.session_state.merchant_bakery == name:
-                st.divider()
-                new_s = st.number_input("Merchant: Inventory", 0, 500, stock)
-                if st.button("Update Stock"):
-                    ws = get_worksheet()
-                    cell = ws.find(name)
-                    ws.update_cell(cell.row, 12, new_s)
-                    ws.update_cell(cell.row, 13, get_now_dk())
-                    st.cache_data.clear(); st.rerun()
-            
-            if st.button("Close ✕"):
-                st.session_state.selected_bakery = None; st.rerun()
-
-# --- 5. TABS DEFINITION ---
-t_map, t_buns, t_route, t_top, t_app = st.tabs(["📍 Map", "🧵 Stream", "🚲 Route", "🏆 Top", "📲 App"])
+# --- 5. TABS ---
+t_map, t_feed, t_route, t_top, t_app = st.tabs(["📍 Map", "🧵 Stream", "🚲 Route", "🏆 Top", "📲 App"])
 
 with t_map:
     m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
-    for _, r in filtered.dropna(subset=['lat', 'lon']).iterrows():
-        color = "red" if r['Stock'] <= 0 else "darkblue" if r['Bakery Name'] == st.session_state.selected_bakery else "green"
-        folium.Marker([r['lat'], r['lon']], tooltip=r['Bakery Name'], icon=folium.Icon(color=color, icon="shopping-basket", prefix="fa")).add_to(m)
-    
-    m_res = st_folium(m, width="100%", height=400, key="main_map")
-    if m_res and m_res.get("last_object_clicked_tooltip"):
-        st.session_state.selected_bakery = m_res["last_object_clicked_tooltip"]
-        st.rerun()
+    for _, r in filtered.dropna(subset=['lat','lon']).iterrows():
+        c = "red" if r['Stock'] <= 0 else "blue" if r['Bakery Name'] == st.session_state.selected_bakery else "green"
+        folium.Marker([r['lat'], r['lon']], tooltip=r['Bakery Name']).add_to(m)
+    st_folium(m, width="100%", height=400)
 
-with t_buns:
-    # --- Pulse Header ---
-    today_activity = df_clean[df_clean['Date'] == datetime.now().strftime("%Y-%m-%d")]
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Spotted Today", f"{len(today_activity)}")
-    c2.metric("City Avg", f"{today_activity['Rating'].mean():.1f}" if not today_activity.empty else "0.0")
-    c3.metric("Live Bakeries", f"{df_clean[df_clean['Stock'] > 0]['Bakery Name'].nunique()}")
-    st.divider()
-
-    # --- Timeline Stream ---
-    timeline = filtered.sort_values(by=['Date', 'Last Updated'], ascending=False)
-    for i, (idx, row) in enumerate(timeline.iterrows()):
+with t_feed:
+    st.subheader("🧵 Live Stream")
+    for i, r in filtered.sort_values(['Date','Last Updated'], ascending=False).iterrows():
         with st.container(border=True):
-            st.markdown(f"**{row['Bakery Name']}** <span style='color:gray;'>@guest</span>", unsafe_allow_html=True)
-            st.markdown(f"**{row['Fastelavnsbolle Type']}** — {'★'*int(row['Rating'])}")
-            if row['Comment']: st.info(f"💬 {row['Comment']}")
-            st.caption(f"Spotted at {row['Last Updated']}")
-            if st.button("Map 📍", key=f"btn_{i}"):
-                st.session_state.selected_bakery = row['Bakery Name']; st.rerun()
-
-with t_route:
-    st.subheader("🚲 Efficient Route")
-    stock_df = filtered[filtered['Stock'] > 0].copy()
-    if not stock_df.empty:
-        stock_df['dist'] = stock_df.apply(lambda r: geodesic((55.6761, 12.5683), (r['lat'], r['lon'])).km, axis=1)
-        for i, (idx, r) in enumerate(stock_df.sort_values('dist').head(5).iterrows()):
-            st.write(f"{i+1}. **{r['Bakery Name']}** ({r['dist']:.1f}km)")
+            is_m = r['Category'] == 'Merchant'
+            st.markdown(f"**{r['Bakery Name']}** {'✅' if is_m else ''} @{r['User']}")
+            if r['Photo URL']: st.image(r['Photo URL'], use_container_width=True)
+            st.write(f"**{r['Fastelavnsbolle Type']}** | {'★'*int(r['Rating'])}")
+            if r['Comment']: st.info(r['Comment'])
+            if st.button("View", key=f"f_{i}"):
+                st.session_state.selected_bakery = r['Bakery Name']; st.rerun()
 
 with t_top:
     st.header("🏆 Rankings")
-    c1, c2 = st.columns(2)
-    valid = df_clean[df_clean['Rating'] > 0]
-    with c1:
-        st.write("Top Flavors")
-        st.dataframe(valid.groupby('Fastelavnsbolle Type')['Rating'].mean().sort_values(ascending=False).head(5))
-    with c2:
-        st.write("Top Bakeries")
-        st.dataframe(valid.groupby('Bakery Name')['Rating'].mean().sort_values(ascending=False).head(5))
+    mode = st.radio("Toggle:", ["Flavours", "Bakeries", "Value", "Users"], horizontal=True)
+    valid = df_raw[df_raw['Rating'] > 0]
+    if mode == "Flavours":
+        st.dataframe(valid.groupby('Fastelavnsbolle Type')['Rating'].mean().sort_values(ascending=False), use_container_width=True)
+    elif mode == "Bakeries":
+        st.dataframe(valid.groupby('Bakery Name')['Rating'].mean().sort_values(ascending=False), use_container_width=True)
+    elif mode == "Value":
+        st.dataframe(valid[['Bakery Name','Value Score']].sort_values('Value Score', ascending=False), use_container_width=True)
+    elif mode == "Users":
+        st.dataframe(valid['User'].value_counts(), use_container_width=True)
 
 with t_app:
-    st.header("🧑‍🍳 Bakery Login")
-    k = st.text_input("Bakery Key", type="password")
-    if k:
-        match = df_clean[df_clean['Bakery Key'].astype(str) == k]
+    st.subheader("👤 User Profile")
+    nick = st.text_input("Choose Nickname", value=st.session_state.user_nickname)
+    if st.button("Save Profile"):
+        st.session_state.user_nickname = nick; st.success("Saved!")
+    
+    st.divider()
+    st.subheader("🧑‍🍳 Merchant Login")
+    k_in = st.text_input("Secret Key", type="password")
+    if k_in:
+        match = df_raw[df_raw['Bakery Key'].astype(str) == k_in]
         if not match.empty:
             st.session_state.merchant_bakery = match['Bakery Name'].iloc[0]
-            st.success(f"Managing: {st.session_state.merchant_bakery}")
+            st.success(f"Logged in: {st.session_state.merchant_bakery}")
