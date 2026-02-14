@@ -221,4 +221,6 @@ with t_app:
         if k_in:
             match = df_raw[df_raw['Bakery Key'].astype(str) == k_in]
             if not match.empty:
-                st.session_state.merchant_bakery = match['Bakery
+                st.session_state.merchant_bakery = match['Bakery Name'].iloc[0]
+                st.toast("Success: Merchant access granted!", icon="🔑")
+                st.rerun()
