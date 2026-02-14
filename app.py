@@ -1,94 +1,161 @@
-# --- THE PULSE COUNTER (Top of Feed) ---
-def render_pulse_header(df):
+import streamlit as st
+import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
+import folium
+from streamlit_folium import st_folium
+from geopy.distance import geodesic
+from datetime import datetime
+import pytz
+import random
+import time
+
+# --- 1. CONFIG & SYSTEM ---
+st.set_page_config(page_title="BolleQuest Pro", layout="wide", initial_sidebar_state="collapsed")
+
+def get_now_dk():
+    return datetime.now(pytz.timezone('Europe/Copenhagen')).strftime("%H:%M")
+
+if "selected_bakery" not in st.session_state:
+    st.session_state.selected_bakery = None
+if "merchant_bakery" not in st.session_state:
+    st.session_state.merchant_bakery = None
+
+# --- 2. DATA CONNECTION ---
+@st.cache_resource
+def get_gs_client():
+    creds_dict = st.secrets["connections"]["my_bakery_db"]
+    return gspread.authorize(Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
+
+def get_worksheet():
     try:
-        # Filter for reports in the last 24 hours
-        # (Simplified check: count rows from 'Today')
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        today_activity = df[df['Date'] == today_str]
-        total_spotted = len(today_activity)
-        avg_rating = today_activity['Rating'].mean() if not today_activity.empty else 0
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Buns Spotted", f"{total_spotted} today")
-        c2.metric("City Avg", f"{avg_rating:.1f} ⭐")
-        c3.metric("Live Bakeries", f"{df[df['Stock'] > 0]['Bakery Name'].nunique()} open")
-        st.divider()
+        return get_gs_client().open_by_key("1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo").get_worksheet(0)
     except:
-        pass
+        st.error("🚫 Google Sheets Access Denied. Check Share settings!")
+        st.stop()
 
-# --- 1. THE TWITTER-STYLE FEED TAB ---
+@st.cache_data(ttl=2)
+def load_data():
+    df = pd.DataFrame(get_worksheet().get_all_records())
+    df.columns = [c.strip() for c in df.columns]
+    num_cols = ['lat', 'lon', 'Rating', 'Price', 'Stock']
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    return df
+
+df_clean = load_data()
+
+# --- 3. HEADER & SEARCH ---
+st.title("🥯 BolleQuest")
+search_q = st.text_input("🔍 Search flavor, bakery, or comments...", placeholder="e.g. 'Vegan'").strip().lower()
+
+filtered = df_clean.copy()
+if search_q:
+    mask = (filtered['Fastelavnsbolle Type'].str.lower().str.contains(search_q, na=False) | 
+            filtered['Bakery Name'].str.lower().str.contains(search_q, na=False) |
+            filtered['Comment'].str.lower().str.contains(search_q, na=False))
+    filtered = filtered[mask]
+
+# --- 4. ACTION CENTER (Popover Logic) ---
+if st.session_state.selected_bakery:
+    name = st.session_state.selected_bakery
+    b_rows = df_clean[df_clean['Bakery Name'] == name]
+    if not b_rows.empty:
+        row = b_rows.iloc[0]
+        with st.popover(f"📍 {name}", use_container_width=True):
+            stock = int(row['Stock'])
+            
+            c1, c2 = st.columns(2)
+            c1.metric("Stock", "SOLD OUT" if stock <= 0 else f"{stock} left")
+            c2.metric("Updated", row.get('Last Updated', '--:--'))
+            
+            # --- POST TO STREAM SECTION ---
+            st.write("**🚀 Post to Stream**")
+            t_flav = st.text_input("Flavor", value=row['Fastelavnsbolle Type'])
+            t_comm = st.text_area("Comment", placeholder="Queue length? Flavor vibes?", max_chars=280)
+            t_rate = st.select_slider("Rating", options=[1, 2, 3, 4, 5], value=4)
+            
+            if st.button("Post 🚀", use_container_width=True, type="primary"):
+                get_worksheet().append_row([
+                    name, t_flav, "", row['Address'], row['lat'], row['lon'],
+                    datetime.now().strftime("%Y-%m-%d"), "User", "Guest",
+                    t_rate, 45, stock, get_now_dk(), row.get('Bakery Key', ''), t_comm
+                ], value_input_option='USER_ENTERED')
+                st.toast("Posted!")
+                st.cache_data.clear(); time.sleep(1); st.rerun()
+
+            if st.session_state.merchant_bakery == name:
+                st.divider()
+                new_s = st.number_input("Merchant: Inventory", 0, 500, stock)
+                if st.button("Update Stock"):
+                    ws = get_worksheet()
+                    cell = ws.find(name)
+                    ws.update_cell(cell.row, 12, new_s)
+                    ws.update_cell(cell.row, 13, get_now_dk())
+                    st.cache_data.clear(); st.rerun()
+            
+            if st.button("Close ✕"):
+                st.session_state.selected_bakery = None; st.rerun()
+
+# --- 5. TABS DEFINITION ---
+t_map, t_buns, t_route, t_top, t_app = st.tabs(["📍 Map", "🧵 Stream", "🚲 Route", "🏆 Top", "📲 App"])
+
+with t_map:
+    m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
+    for _, r in filtered.dropna(subset=['lat', 'lon']).iterrows():
+        color = "red" if r['Stock'] <= 0 else "darkblue" if r['Bakery Name'] == st.session_state.selected_bakery else "green"
+        folium.Marker([r['lat'], r['lon']], tooltip=r['Bakery Name'], icon=folium.Icon(color=color, icon="shopping-basket", prefix="fa")).add_to(m)
+    
+    m_res = st_folium(m, width="100%", height=400, key="main_map")
+    if m_res and m_res.get("last_object_clicked_tooltip"):
+        st.session_state.selected_bakery = m_res["last_object_clicked_tooltip"]
+        st.rerun()
+
 with t_buns:
-    render_pulse_header(df_clean)
-    
-    st.subheader("🧵 The Bun Stream")
-    
-    # Sort: Absolute latest on top
+    # --- Pulse Header ---
+    today_activity = df_clean[df_clean['Date'] == datetime.now().strftime("%Y-%m-%d")]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Spotted Today", f"{len(today_activity)}")
+    c2.metric("City Avg", f"{today_activity['Rating'].mean():.1f}" if not today_activity.empty else "0.0")
+    c3.metric("Live Bakeries", f"{df_clean[df_clean['Stock'] > 0]['Bakery Name'].nunique()}")
+    st.divider()
+
+    # --- Timeline Stream ---
     timeline = filtered.sort_values(by=['Date', 'Last Updated'], ascending=False)
-    
-    if timeline.empty:
-        st.info("The stream is quiet... Go be the first to report! 🥯")
-    else:
-        for i, (idx, row) in enumerate(timeline.iterrows()):
-            with st.container(border=True):
-                # Header: User Handle & Relative Time
-                col_u, col_t = st.columns([3, 1])
-                with col_u:
-                    # Create a "Handle" from the user name or bakery name
-                    handle = row['User'].replace(" ", "").lower() if row['User'] else "guest"
-                    st.markdown(f"**{row['Bakery Name']}** <span style='color:gray; font-size:0.8em;'>@{handle}</span>", unsafe_allow_html=True)
-                
-                with col_t:
-                    try:
-                        report_t = datetime.strptime(row['Last Updated'], "%H:%M")
-                        now_t = datetime.strptime(get_now_dk(), "%H:%M")
-                        diff_min = int((now_t - report_t).total_seconds() / 60)
-                        
-                        if 0 <= diff_min < 60:
-                            st.caption(f"• {diff_min}m")
-                        else:
-                            st.caption(f"• {row['Last Updated']}")
-                    except:
-                        st.caption(f"• {row['Last Updated']}")
+    for i, (idx, row) in enumerate(timeline.iterrows()):
+        with st.container(border=True):
+            st.markdown(f"**{row['Bakery Name']}** <span style='color:gray;'>@guest</span>", unsafe_allow_html=True)
+            st.markdown(f"**{row['Fastelavnsbolle Type']}** — {'★'*int(row['Rating'])}")
+            if row['Comment']: st.info(f"💬 {row['Comment']}")
+            st.caption(f"Spotted at {row['Last Updated']}")
+            if st.button("Map 📍", key=f"btn_{i}"):
+                st.session_state.selected_bakery = row['Bakery Name']; st.rerun()
 
-                # The "Tweet" Content
-                st.markdown(f"**Flavor:** {row['Fastelavnsbolle Type']}")
-                
-                # Star Rating Bar
-                stars = "★" * int(round(row['Rating'])) + "☆" * (5 - int(round(row['Rating'])))
-                st.markdown(f"<span style='color:#FFB800;'>{stars}</span>", unsafe_allow_html=True)
+with t_route:
+    st.subheader("🚲 Efficient Route")
+    stock_df = filtered[filtered['Stock'] > 0].copy()
+    if not stock_df.empty:
+        stock_df['dist'] = stock_df.apply(lambda r: geodesic((55.6761, 12.5683), (r['lat'], r['lon'])).km, axis=1)
+        for i, (idx, r) in enumerate(stock_df.sort_values('dist').head(5).iterrows()):
+            st.write(f"{i+1}. **{r['Bakery Name']}** ({r['dist']:.1f}km)")
 
-                # The "X-style" Comment
-                if 'Comment' in row and row['Comment']:
-                    st.markdown(f" {row['Comment']}")
-                
-                # Action Bar
-                ca, cb, cc = st.columns([1, 1, 3])
-                with ca:
-                    if st.button("📍", key=f"fmap_{i}", help="Show on map"):
-                        st.session_state.selected_bakery = row['Bakery Name']
-                        st.rerun()
-                with cb:
-                    st.button("❤️", key=f"like_{i}")
-                with cc:
-                    # Status Indicator
-                    if row['Stock'] <= 0:
-                        st.markdown("<span style='color:red; font-size:0.8em;'>🚫 SOLD OUT</span>", unsafe_allow_html=True)
-                    else:
-                        st.markdown("<span style='color:green; font-size:0.8em;'>✅ IN STOCK</span>", unsafe_allow_html=True)
+with t_top:
+    st.header("🏆 Rankings")
+    c1, c2 = st.columns(2)
+    valid = df_clean[df_clean['Rating'] > 0]
+    with c1:
+        st.write("Top Flavors")
+        st.dataframe(valid.groupby('Fastelavnsbolle Type')['Rating'].mean().sort_values(ascending=False).head(5))
+    with c2:
+        st.write("Top Bakeries")
+        st.dataframe(valid.groupby('Bakery Name')['Rating'].mean().sort_values(ascending=False).head(5))
 
-# --- 2. UPDATE THE "POST" BUTTON IN POPOVER ---
-# (Inside your Action Center logic)
-with st.popover("🚀 Post to Stream", use_container_width=True):
-    tweet_content = st.text_area("What's the status?", placeholder="Flavor, queue length, or general vibes...", max_chars=280)
-    tweet_flavor = st.text_input("Specific Flavor", value=row['Fastelavnsbolle Type'])
-    tweet_rating = st.select_slider("Rate this bun", options=[1, 2, 3, 4, 5], value=4)
-    
-    if st.button("Post 🚀", use_container_width=True, type="primary"):
-        ws = get_worksheet()
-        ws.append_row([
-            name, tweet_flavor, "", row['Address'], row['lat'], row['lon'],
-            datetime.now().strftime("%Y-%m-%d"), "User Report", "Guest",
-            tweet_rating, 45, stock, get_now_dk(), row.get('Bakery Key', ''), tweet_content
-        ], value_input_option='USER_ENTERED')
-        st.toast("Posted to the Stream!")
-        st.cache_data.clear(); time.sleep(1); st.rerun()
+with t_app:
+    st.header("🧑‍🍳 Bakery Login")
+    k = st.text_input("Bakery Key", type="password")
+    if k:
+        match = df_clean[df_clean['Bakery Key'].astype(str) == k]
+        if not match.empty:
+            st.session_state.merchant_bakery = match['Bakery Name'].iloc[0]
+            st.success(f"Managing: {st.session_state.merchant_bakery}")
