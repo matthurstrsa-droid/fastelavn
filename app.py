@@ -330,7 +330,7 @@ with t_map:
         with col_s:
             search_q = st.text_input("🔍 Search bakery / flavor", "").lower().strip()
         with col_r:
-            min_rating = st.slider("⭐ Min rating", 0.0, 5.0, 3.0, 0.25)
+            min_rating = st.slider("⭐ Min rating", 0.0, 5.0, 0.0, 0.5)
         with col_p:
             max_price = st.slider("💰 Max price (DKK)", 10, 200, 200, 5)
         hide_sold_out = st.checkbox("🚫 Hide sold-out bakeries", value=False)
@@ -461,7 +461,7 @@ with t_map:
                                 wait_val = entry["wait"]
 
                         if show_form:
-                            with st.form("final_review", clear_on_submit=True):
+                            with st.form("final_review", clear_on_submit=False):
                                 st.markdown("**📸 Add a photo** *(optional — taken with your camera or uploaded)*")
                                 uploaded_file = st.file_uploader(
                                     "Photo", type=['jpg', 'jpeg', 'png', 'webp'],
@@ -507,53 +507,43 @@ with t_map:
 
             st.divider()
 
-    # ── MAP ───────────────────────────────────
-    # Build per-bakery latest snapshot for markers
-    if not filtered.empty:
-        latest = (
-            filtered.sort_values(['Bakery Name', 'Date', 'Time'])
-            .groupby('Bakery Name')
-            .last()
-            .reset_index()
-        )
-    else:
-        latest = pd.DataFrame()
+    # ── MAP — hidden while a bakery panel is open ─────────────────────────
+    if not st.session_state.selected_bakery:
+        if not filtered.empty:
+            latest = (
+                filtered.sort_values(['Bakery Name', 'Date', 'Time'])
+                .groupby('Bakery Name')
+                .last()
+                .reset_index()
+            )
+        else:
+            latest = pd.DataFrame()
 
-    m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
+        m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
 
-    for _, r in latest.dropna(subset=['lat', 'lon']).iterrows():
-        if r['lat'] == 0 and r['lon'] == 0:
-            continue
-        sold_out = r['Stock'] <= 0
-        is_bv    = r['Bakery Name'] == best_value_bakery
-        color    = "red" if sold_out else ("green" if not is_bv else "darkgreen")
-        icon_sym = "times" if sold_out else ("star" if is_bv else "shopping-basket")
+        for _, r in latest.dropna(subset=['lat', 'lon']).iterrows():
+            if r['lat'] == 0 and r['lon'] == 0:
+                continue
+            sold_out = r['Stock'] <= 0
+            is_bv    = r['Bakery Name'] == best_value_bakery
+            color    = "red" if sold_out else ("green" if not is_bv else "darkgreen")
+            icon_sym = "times" if sold_out else ("star" if is_bv else "shopping-basket")
+            folium.Marker(
+                [r['lat'], r['lon']],
+                tooltip=r['Bakery Name'],
+                icon=folium.Icon(color=color, icon=icon_sym, prefix='fa'),
+            ).add_to(m)
 
-        popup_html = f"""
-        <b>{r['Bakery Name']}</b><br>
-        {('💚 Best Value<br>') if is_bv else ''}
-        {'🚫 Sold out' if sold_out else f"✅ {int(r['Stock'])} left"}<br>
-        🍩 {r['Fastelavnsbolle Type']}<br>
-        💰 {int(r['Price'])} kr &nbsp; ⭐ {float(r['Rating']):.1f}
-        """
-        folium.Marker(
-            [r['lat'], r['lon']],
-            tooltip=r['Bakery Name'],
-            popup=folium.Popup(popup_html, max_width=200),
-            icon=folium.Icon(color=color, icon=icon_sym, prefix='fa'),
-        ).add_to(m)
+        res = st_folium(m, width="100%", height=480, key="main_map")
+        if res.get("last_object_clicked_tooltip"):
+            clicked = res["last_object_clicked_tooltip"]
+            if st.session_state.selected_bakery != clicked:
+                st.session_state.selected_bakery = clicked
+                st.rerun()
 
-    res = st_folium(m, width="100%", height=480, key="main_map")
-    if res.get("last_object_clicked_tooltip"):
-        clicked = res["last_object_clicked_tooltip"]
-        if st.session_state.selected_bakery != clicked:
-            st.session_state.selected_bakery = clicked
+        if st.button("🔄 Refresh Data"):
+            st.cache_data.clear()
             st.rerun()
-
-    # Manual refresh (avoids constant rerun hammering the API)
-    if st.button("🔄 Refresh Data"):
-        st.cache_data.clear()
-        st.rerun()
 
 # ══════════════════════════════════════════════
 # TAB: STREAM
@@ -580,6 +570,7 @@ with t_stream:
             for _, r in s_df.iterrows():
                 is_bv = (r['Bakery Name'] == best_value_bakery)
                 bv_tag = '<span class="badge badge-best">💚 Best Value</span>' if is_bv else ''
+                photo_url = str(r.get('Photo URL', ''))
                 st.markdown(f"""
                 <div class="review-card">
                   <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; 👤 @{r['User']} &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
@@ -587,10 +578,12 @@ with t_stream:
                        &nbsp;|&nbsp; ⏳ {int(float(r.get('Wait Time', 0)))} min wait
                        &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr</div>
                   <div>🍩 {r['Fastelavnsbolle Type']}</div>
-                  {'<img src="' + r['Photo URL'] + '" style="max-width:100%;border-radius:10px;margin-top:10px;" />' if str(r['Photo URL']).startswith('http') else ''}
-                  {'<div class="comment">' + r['Comment'] + '</div>' if r['Comment'] else ''}
+                  {'<div class="comment">' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
                 </div>
                 """, unsafe_allow_html=True)
+                # Render photo separately — much more reliable than embedding in HTML
+                if photo_url.startswith('http'):
+                    st.image(photo_url, use_container_width=True)
     else:
         st.info("No data yet.")
 
@@ -772,5 +765,3 @@ Awarded to the bakery with the highest rating-to-price ratio. Updated live.
 **For bakeries**
 Enter your secret key in ⚙️ Settings to unlock merchant tools and broadcast stock updates.
     """)
-
-
