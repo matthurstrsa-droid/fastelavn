@@ -468,7 +468,7 @@ with t_map:
                                     label_visibility="collapsed"
                                 )
                                 t_f = st.text_input("Flavor", value=str(b_data['Fastelavnsbolle Type']))
-                                t_r = st.slider("Your Rating ⭐", 1.0, 5.0, 4.0, 0.5)
+                                t_r = st.slider("Your Rating ⭐", 1.0, 5.0, 3.0, 0.25)
                                 t_p = st.number_input("Price paid (DKK)", 0, 200, int(b_data['Price']))
                                 t_c = st.text_area("Your review", placeholder="Flaky, sweet, cream-filled perfection…")
 
@@ -772,4 +772,5 @@ Awarded to the bakery with the highest rating-to-price ratio. Updated live.
 **For bakeries**
 Enter your secret key in ⚙️ Settings to unlock merchant tools and broadcast stock updates.
     """)
+
 
