@@ -645,8 +645,9 @@ with t_top:
                 df_raw[df_raw['Category'] == 'User']['User']
                 .value_counts()
                 .reset_index()
-                .rename(columns={'index': 'User', 'User': 'count'})
             )
+            # Modern pandas (>=1.1) already names cols ['User', 'count']
+            u_counts.columns = ['User', 'count']
             for i, row in u_counts.head(10).iterrows():
                 user_revs = df_raw[df_raw['User'] == row['User']]
                 badges_html = "".join(compute_badges(user_revs))
