@@ -330,7 +330,7 @@ with t_map:
         with col_s:
             search_q = st.text_input("🔍 Search bakery / flavor", "").lower().strip()
         with col_r:
-            min_rating = st.slider("⭐ Min rating", 0.0, 5.0, 0.0, 0.5)
+            min_rating = st.slider("⭐ Min rating", 0.0, 5.0, 3.0, 0.25)
         with col_p:
             max_price = st.slider("💰 Max price (DKK)", 10, 200, 200, 5)
         hide_sold_out = st.checkbox("🚫 Hide sold-out bakeries", value=False)
@@ -772,3 +772,4 @@ Awarded to the bakery with the highest rating-to-price ratio. Updated live.
 **For bakeries**
 Enter your secret key in ⚙️ Settings to unlock merchant tools and broadcast stock updates.
     """)
+
