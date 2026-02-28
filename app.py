@@ -357,7 +357,53 @@ with t_map:
         if hide_sold_out:
             filtered = filtered[filtered['Stock'] > 0]
 
-    # ── Action Panel (selected bakery) ────────
+    # ── MAP — always visible ───────────────────────────────────────────────
+    if not filtered.empty:
+        latest = (
+            filtered.sort_values(['Bakery Name', 'Date', 'Time'])
+            .groupby('Bakery Name')
+            .last()
+            .reset_index()
+        )
+    else:
+        latest = pd.DataFrame()
+
+    m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
+
+    for _, r in latest.dropna(subset=['lat', 'lon']).iterrows():
+        if r['lat'] == 0 and r['lon'] == 0:
+            continue
+        sold_out = r['Stock'] <= 0
+        is_bv    = r['Bakery Name'] == best_value_bakery
+        color    = "red" if sold_out else ("green" if not is_bv else "darkgreen")
+        icon_sym = "times" if sold_out else ("star" if is_bv else "shopping-basket")
+        stock_txt = "🚫 Sold out" if sold_out else f"✅ {int(r['Stock'])} left"
+        popup_html = (
+            f"<b>{r['Bakery Name']}</b><br>"
+            f"{'💚 Best Value<br>' if is_bv else ''}"
+            f"{stock_txt}<br>"
+            f"🍩 {r['Fastelavnsbolle Type']}<br>"
+            f"💰 {int(r['Price'])} kr &nbsp; ⭐ {float(r['Rating']):.1f}"
+        )
+        folium.Marker(
+            [r['lat'], r['lon']],
+            tooltip=r['Bakery Name'],
+            popup=folium.Popup(popup_html, max_width=220),
+            icon=folium.Icon(color=color, icon=icon_sym, prefix='fa'),
+        ).add_to(m)
+
+    res = st_folium(m, width="100%", height=480, key="main_map")
+    if res.get("last_object_clicked_tooltip"):
+        clicked = res["last_object_clicked_tooltip"]
+        if st.session_state.selected_bakery != clicked:
+            st.session_state.selected_bakery = clicked
+            st.rerun()
+
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+    # ── Action Panel (below map, visible after tapping a pin) ─────────────
     if st.session_state.selected_bakery:
         name = st.session_state.selected_bakery
         b_rows = df_raw[df_raw['Bakery Name'] == name]
@@ -368,6 +414,8 @@ with t_map:
             is_merchant = st.session_state.merchant_bakery == name
             is_best_value = (best_value_bakery == name)
             on_wish_list = name in st.session_state.wish_list
+
+            st.divider()
 
             # Bakery headline
             title_extra = ""
@@ -483,14 +531,12 @@ with t_map:
                                            get_now_dk().strftime("%H:%M"), "", str(t_c),
                                            int(wait_val)]
                                     post_to_sheets(row)
-                                    # Clear state
                                     if name in st.session_state.arrival_times:
                                         del st.session_state.arrival_times[name]
                                     st.session_state.review_mode = None
                                     st.session_state.selected_bakery = None
                                     st.cache_data.clear()
                                     st.balloons()
-                                    # Check for new badges
                                     new_df = load_data()
                                     user_revs = new_df[new_df['User'] == st.session_state.user_nickname]
                                     new_badges = compute_badges(user_revs)
@@ -504,54 +550,6 @@ with t_map:
                 st.session_state.review_mode = None
                 st.session_state.selected_bakery = None
                 st.rerun()
-
-            st.divider()
-
-    # ── MAP — always visible ───────────────────────────────────────────────
-    if not filtered.empty:
-        latest = (
-            filtered.sort_values(['Bakery Name', 'Date', 'Time'])
-            .groupby('Bakery Name')
-            .last()
-            .reset_index()
-        )
-    else:
-        latest = pd.DataFrame()
-
-    m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
-
-    for _, r in latest.dropna(subset=['lat', 'lon']).iterrows():
-        if r['lat'] == 0 and r['lon'] == 0:
-            continue
-        sold_out = r['Stock'] <= 0
-        is_bv    = r['Bakery Name'] == best_value_bakery
-        color    = "red" if sold_out else ("green" if not is_bv else "darkgreen")
-        icon_sym = "times" if sold_out else ("star" if is_bv else "shopping-basket")
-        stock_txt = "🚫 Sold out" if sold_out else f"✅ {int(r['Stock'])} left"
-        popup_html = (
-            f"<b>{r['Bakery Name']}</b><br>"
-            f"{'💚 Best Value<br>' if is_bv else ''}"
-            f"{stock_txt}<br>"
-            f"🍩 {r['Fastelavnsbolle Type']}<br>"
-            f"💰 {int(r['Price'])} kr &nbsp; ⭐ {float(r['Rating']):.1f}"
-        )
-        folium.Marker(
-            [r['lat'], r['lon']],
-            tooltip=r['Bakery Name'],
-            popup=folium.Popup(popup_html, max_width=220),
-            icon=folium.Icon(color=color, icon=icon_sym, prefix='fa'),
-        ).add_to(m)
-
-    res = st_folium(m, width="100%", height=480, key="main_map")
-    if res.get("last_object_clicked_tooltip"):
-        clicked = res["last_object_clicked_tooltip"]
-        if st.session_state.selected_bakery != clicked:
-            st.session_state.selected_bakery = clicked
-            st.rerun()
-
-    if st.button("🔄 Refresh Data"):
-        st.cache_data.clear()
-        st.rerun()
 
 # ══════════════════════════════════════════════
 # TAB: STREAM
