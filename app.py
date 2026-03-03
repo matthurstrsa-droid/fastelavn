@@ -356,7 +356,14 @@ with t_map:
         if max_price < 200:
             filtered = filtered[filtered['Price'] <= max_price]
         if hide_sold_out:
-            filtered = filtered[filtered['Stock'] > 0]
+            # Filter based on LATEST stock per bakery, not per row
+            latest_stock = (
+                filtered.sort_values(['Bakery Name', 'Date', 'Time'])
+                .groupby('Bakery Name')['Stock']
+                .last()
+            )
+            in_stock_bakeries = latest_stock[latest_stock > 0].index
+            filtered = filtered[filtered['Bakery Name'].isin(in_stock_bakeries)]
 
     # ── Compact action strip — appears above map when a bakery is selected ──
     if st.session_state.selected_bakery:
@@ -603,7 +610,7 @@ with t_map:
                                get_now_dk().strftime("%H:%M"), "", m_comm, 0]
                         post_to_sheets(row)
                         st.cache_data.clear()
-                        st.success("Broadcast sent!")
+                        st.toast("📡 Broadcast sent!", icon="✅")
                         st.rerun()
 
             # ── REVIEW FORM now rendered above the map in the action strip ──
@@ -623,7 +630,7 @@ with t_stream:
             st.rerun()
 
     if not df_raw.empty:
-        s_df = df_raw[df_raw['Category'] == 'User'].sort_values(
+        s_df = df_raw[df_raw['Category'].isin(['User', 'Merchant'])].sort_values(
             by=["Date", "Time"], ascending=False
         )
         if st.session_state.user_filter:
@@ -636,19 +643,29 @@ with t_stream:
                 is_bv = (r['Bakery Name'] == best_value_bakery)
                 bv_tag = '<span class="badge badge-best">💚 Best Value</span>' if is_bv else ''
                 photo_url = str(r.get('Photo URL', ''))
-                st.markdown(f"""
-                <div class="review-card">
-                  <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; 👤 @{r['User']} &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
-                  <div class="stars">{stars(float(r['Rating']))} &nbsp; <b>{float(r['Rating']):.1f}</b>
-                       &nbsp;|&nbsp; ⏳ {int(float(r.get('Wait Time', 0)))} min wait
-                       &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr</div>
-                  <div>🍩 {r['Fastelavnsbolle Type']}</div>
-                  {'<div class="comment">' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
-                </div>
-                """, unsafe_allow_html=True)
-                # Render photo separately — much more reliable than embedding in HTML
-                if photo_url.startswith('http'):
-                    st.image(photo_url, use_container_width=True)
+                is_merchant = r['Category'] == 'Merchant'
+
+                if is_merchant:
+                    st.markdown(f"""
+                    <div class="review-card" style="border-color:#ffb347;background:#fff8f2;">
+                      <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; 🧑‍🍳 <b>Merchant Update</b> &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
+                      <div>🍩 {r['Fastelavnsbolle Type']} &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr &nbsp;|&nbsp; 📦 {int(float(r['Stock']))} in stock</div>
+                      {'<div class="comment">📣 ' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class="review-card">
+                      <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; 👤 @{r['User']} &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
+                      <div class="stars">{stars(float(r['Rating']))} &nbsp; <b>{float(r['Rating']):.1f}</b>
+                           &nbsp;|&nbsp; ⏳ {int(float(r.get('Wait Time', 0)))} min wait
+                           &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr</div>
+                      <div>🍩 {r['Fastelavnsbolle Type']}</div>
+                      {'<div class="comment">' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if photo_url.startswith('http'):
+                        st.image(photo_url, use_container_width=True)
     else:
         st.info("No data yet.")
 
@@ -830,7 +847,7 @@ with t_settings:
                            get_now_dk().strftime("%H:%M"), "", m_comm, 0]
                     post_to_sheets(row)
                     st.cache_data.clear()
-                    st.success("✅ Broadcast sent!")
+                    st.toast("📡 Broadcast sent!", icon="✅")
                     st.rerun()
 
         if st.button("🚪 Log Out"):
