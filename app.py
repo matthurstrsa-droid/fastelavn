@@ -203,7 +203,8 @@ def load_data():
         df.columns = [c.strip() for c in df.columns]
         num_cols = ['lat', 'lon', 'Stock', 'Price', 'Rating', 'Wait Time']
         str_cols = ['Photo URL', 'Comment', 'Fastelavnsbolle Type', 'Bakery Name',
-                    'Address', 'Date', 'Time', 'Category', 'User', 'Bakery Key']
+                    'Address', 'Date', 'Time', 'Category', 'User', 'Bakery Key',
+                    'Opening Hours']
         for col in num_cols:
             if col not in df.columns:
                 df[col] = 0
@@ -493,17 +494,42 @@ with t_map:
         color    = "red" if sold_out else ("green" if not is_bv else "darkgreen")
         icon_sym = "times" if sold_out else ("star" if is_bv else "shopping-basket")
         stock_txt = "🚫 Sold out" if sold_out else f"✅ {int(r['Stock'])} left"
+
+        # Avg wait from stats
+        avg_wait_txt = ""
+        if not stats_df.empty and r['Bakery Name'] in stats_df['Bakery Name'].values:
+            bk_row = stats_df[stats_df['Bakery Name'] == r['Bakery Name']].iloc[0]
+            avg_wait_txt = f"⏳ ~{int(bk_row['avg_wait'])} min avg wait<br>"
+
+        # Opening hours — reads today's day name, matches against sheet column
+        hours_txt = ""
+        day_name = get_now_dk().strftime("%A")  # e.g. "Monday"
+        oh = str(r.get('Opening Hours', ''))
+        if oh and oh.lower() not in ('', 'nan', '0'):
+            hours_txt = f"🕐 {oh}<br>"
+
+        # Google Maps directions link
+        directions_url = f"https://www.google.com/maps/dir/?api=1&destination={r['lat']},{r['lon']}"
+
         popup_html = (
-            f"<b>{r['Bakery Name']}</b><br>"
-            f"{'💚 Best Value<br>' if is_bv else ''}"
+            f"<div style='font-family:sans-serif;font-size:13px;min-width:180px'>"
+            f"<b style='font-size:14px'>{r['Bakery Name']}</b><br>"
+            f"{'<span style=\"color:#059669\">💚 Best Value</span><br>' if is_bv else ''}"
             f"{stock_txt}<br>"
             f"🍩 {r['Fastelavnsbolle Type']}<br>"
-            f"💰 {int(r['Price'])} kr &nbsp; ⭐ {float(r['Rating']):.1f}"
+            f"💰 {int(r['Price'])} kr &nbsp; ⭐ {float(r['Rating']):.1f}<br>"
+            f"{avg_wait_txt}"
+            f"{hours_txt}"
+            f"<a href='{directions_url}' target='_blank' "
+            f"style='display:inline-block;margin-top:6px;background:#ff7e00;color:white;"
+            f"padding:4px 10px;border-radius:8px;text-decoration:none;font-size:12px'>"
+            f"🗺 Directions</a>"
+            f"</div>"
         )
         folium.Marker(
             [r['lat'], r['lon']],
             tooltip=r['Bakery Name'],
-            popup=folium.Popup(popup_html, max_width=220),
+            popup=folium.Popup(popup_html, max_width=240),
             icon=folium.Icon(color=color, icon=icon_sym, prefix='fa'),
         ).add_to(m)
 
@@ -672,33 +698,33 @@ with t_top:
                 )
 
         with c2:
-            st.markdown("**👑 Top Hunters**")
-            u_counts = (
-                df_raw[df_raw['Category'] == 'User']['User']
-                .value_counts()
-                .reset_index()
-            )
-            # Modern pandas (>=1.1) already names cols ['User', 'count']
-            u_counts.columns = ['User', 'count']
-            for i, row in u_counts.head(10).iterrows():
-                user_revs = df_raw[df_raw['User'] == row['User']]
-                badges_html = "".join(compute_badges(user_revs))
-                col_a, col_b = st.columns([3, 1])
-                col_a.markdown(
-                    f"**@{row['User']}** — {int(row['count'])} reviews<br>{badges_html}",
-                    unsafe_allow_html=True
-                )
-                if col_b.button("View", key=f"u_{i}"):
-                    st.session_state.user_filter = row['User']
-                    st.rerun()
-
-            st.markdown("---")
             st.markdown("**💰 Best Value Scores**")
             for _, row in stats_df.sort_values('value_score', ascending=False).head(8).iterrows():
                 st.markdown(
                     f"**{row['Bakery Name']}** — score {row['value_score']:.2f} "
                     f"(⭐{row['avg_rating']:.1f} / {int(row['avg_price'])}kr)"
                 )
+
+        # ── Top Hunters — full width below so expanding reviews don't push Best Value off screen ──
+        st.divider()
+        st.markdown("**👑 Top Hunters**")
+        u_counts = (
+            df_raw[df_raw['Category'] == 'User']['User']
+            .value_counts()
+            .reset_index()
+        )
+        u_counts.columns = ['User', 'count']
+        for i, row in u_counts.head(10).iterrows():
+            user_revs = df_raw[df_raw['User'] == row['User']]
+            badges_html = "".join(compute_badges(user_revs))
+            col_a, col_b = st.columns([5, 1])
+            col_a.markdown(
+                f"**@{row['User']}** — {int(row['count'])} reviews<br>{badges_html}",
+                unsafe_allow_html=True
+            )
+            if col_b.button("View", key=f"u_{i}"):
+                st.session_state.user_filter = row['User']
+                st.rerun()
 
     # ── Inline user reviews, shown when View is clicked ───────────────────
     if st.session_state.user_filter and not df_raw.empty:
