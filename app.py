@@ -807,9 +807,32 @@ with t_settings:
             st.info("No badges yet — submit your first review to earn one!")
 
     st.divider()
-    st.markdown("**Merchant Access**")
+    st.markdown("**🧑‍🍳 Merchant Access**")
     if st.session_state.merchant_bakery:
-        st.success(f"✅ Logged in as merchant: **{st.session_state.merchant_bakery}**")
+        name = st.session_state.merchant_bakery
+        st.success(f"✅ Logged in as: **{name}**")
+
+        b_rows = df_raw[df_raw['Bakery Name'] == name]
+        if not b_rows.empty:
+            b_data = b_rows.iloc[-1]
+            st.markdown("##### Update Your Shop")
+            with st.form("merchant_update_settings"):
+                new_stock  = st.number_input("Current Stock", 0, 1000, int(b_data['Stock']))
+                new_flavor = st.text_input("Today's Featured Flavor", value=str(b_data['Fastelavnsbolle Type']))
+                new_price  = st.number_input("Price (DKK)", 0, 200, int(b_data['Price']))
+                new_hours  = st.text_input("Opening Hours", value=str(b_data.get('Opening Hours', '')))
+                m_comm     = st.text_area("Merchant Note (e.g. 'Next batch at 2pm!')", value="")
+                if st.form_submit_button("📡 Broadcast Update", use_container_width=True, type="primary"):
+                    row = [name, new_flavor, "", str(b_data['Address']),
+                           float(b_data['lat']), float(b_data['lon']),
+                           get_now_dk().strftime("%Y-%m-%d"), "Merchant", name,
+                           5.0, new_price, new_stock,
+                           get_now_dk().strftime("%H:%M"), "", m_comm, 0]
+                    post_to_sheets(row)
+                    st.cache_data.clear()
+                    st.success("✅ Broadcast sent!")
+                    st.rerun()
+
         if st.button("🚪 Log Out"):
             st.session_state.merchant_bakery = None
             st.rerun()
