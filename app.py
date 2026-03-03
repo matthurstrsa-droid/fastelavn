@@ -690,11 +690,6 @@ with t_top:
                 )
                 if col_b.button("View", key=f"u_{i}"):
                     st.session_state.user_filter = row['User']
-                    # Switch to Stream tab (index 1) via JS
-                    st.markdown(
-                        "<script>window.parent.document.querySelectorAll('[data-baseweb=tab]')[1].click()</script>",
-                        unsafe_allow_html=True
-                    )
                     st.rerun()
 
             st.markdown("---")
@@ -704,6 +699,37 @@ with t_top:
                     f"**{row['Bakery Name']}** — score {row['value_score']:.2f} "
                     f"(⭐{row['avg_rating']:.1f} / {int(row['avg_price'])}kr)"
                 )
+
+    # ── Inline user reviews, shown when View is clicked ───────────────────
+    if st.session_state.user_filter and not df_raw.empty:
+        st.divider()
+        st.markdown(f"#### 👤 Reviews by @{st.session_state.user_filter}")
+        if st.button("✖ Clear", key="rankings_clear_filter"):
+            st.session_state.user_filter = None
+            st.rerun()
+        user_df = df_raw[
+            (df_raw['User'] == st.session_state.user_filter) &
+            (df_raw['Category'] == 'User')
+        ].sort_values(by=["Date", "Time"], ascending=False)
+        if user_df.empty:
+            st.info("No reviews yet.")
+        else:
+            for _, r in user_df.iterrows():
+                is_bv = (r['Bakery Name'] == best_value_bakery)
+                bv_tag = '<span class="badge badge-best">💚 Best Value</span>' if is_bv else ''
+                photo_url = str(r.get('Photo URL', ''))
+                st.markdown(f"""
+                <div class="review-card">
+                  <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
+                  <div class="stars">{stars(float(r['Rating']))} &nbsp; <b>{float(r['Rating']):.1f}</b>
+                       &nbsp;|&nbsp; ⏳ {int(float(r.get('Wait Time', 0)))} min wait
+                       &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr</div>
+                  <div>🍩 {r['Fastelavnsbolle Type']}</div>
+                  {'<div class="comment">' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
+                </div>
+                """, unsafe_allow_html=True)
+                if photo_url.startswith('http'):
+                    st.image(photo_url, use_container_width=True)
     else:
         st.info("No reviews yet. Start hunting!")
 
