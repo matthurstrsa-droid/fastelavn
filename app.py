@@ -417,7 +417,8 @@ with t_map:
                 ca, cb, cc = st.columns([2, 2, 1])
                 with ca:
                     if st.button("🏁 Queue Again", use_container_width=True, key="strip_requeue"):
-                        del st.session_state.arrival_times[name]
+                        if name in st.session_state.arrival_times:
+                            del st.session_state.arrival_times[name]
                         st.session_state.review_mode = None
                         st.session_state.arrival_times[name] = {"start": get_now_dk(), "wait": None}
                         st.rerun()
