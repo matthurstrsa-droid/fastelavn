@@ -357,6 +357,57 @@ with t_map:
         if hide_sold_out:
             filtered = filtered[filtered['Stock'] > 0]
 
+    # ── Compact action strip — appears above map when a bakery is selected ──
+    if st.session_state.selected_bakery:
+        name = st.session_state.selected_bakery
+        b_rows = df_raw[df_raw['Bakery Name'] == name]
+        if not b_rows.empty:
+            b_data = b_rows.iloc[-1]
+            sold_out = b_data['Stock'] <= 0
+            in_queue = name in st.session_state.arrival_times
+            in_fast  = st.session_state.review_mode == "instant"
+
+            stock_badge = "🔴 Sold out" if sold_out else f"🟢 {int(b_data['Stock'])} left"
+            st.markdown(f"""
+            <div style="background:#fff8f2;border:2px solid #ffb347;border-radius:14px;
+                        padding:14px 18px;margin-bottom:10px;">
+              <div style="font-size:1.1rem;font-weight:700;color:#3d1a00">
+                📍 {name} &nbsp; <span style="font-size:0.85rem;font-weight:400;color:#888">{stock_badge} · 🍩 {b_data['Fastelavnsbolle Type']} · 💰 {int(b_data['Price'])} kr</span>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if not sold_out and not in_queue and not in_fast:
+                ca, cb, cc = st.columns([2, 2, 1])
+                with ca:
+                    if st.button("🏁 Join the Queue", use_container_width=True, key="strip_queue"):
+                        st.session_state.arrival_times[name] = {"start": get_now_dk(), "wait": None}
+                        st.rerun()
+                with cb:
+                    if st.button("🚀 Fast Review", use_container_width=True, key="strip_fast"):
+                        st.session_state.review_mode = "instant"
+                        st.rerun()
+                with cc:
+                    if st.button("✖", use_container_width=True, key="strip_close"):
+                        st.session_state.selected_bakery = None
+                        st.rerun()
+            elif in_queue and st.session_state.arrival_times[name]["wait"] is None:
+                w_now = (get_now_dk() - st.session_state.arrival_times[name]["start"]).seconds // 60
+                ca, cb = st.columns([3, 1])
+                ca.info(f"⏱️ In queue: **{w_now} min** so far…")
+                with cb:
+                    if st.button("🛍️ Got it!", type="primary", use_container_width=True, key="strip_got"):
+                        st.session_state.arrival_times[name]["wait"] = max(1, w_now)
+                        st.rerun()
+            else:
+                # Form is active — just show a close button
+                if st.button("✖ Cancel", use_container_width=True, key="strip_cancel"):
+                    if name in st.session_state.arrival_times:
+                        del st.session_state.arrival_times[name]
+                    st.session_state.review_mode = None
+                    st.session_state.selected_bakery = None
+                    st.rerun()
+
     # ── MAP — always visible ───────────────────────────────────────────────
     if not filtered.empty:
         latest = (
@@ -403,30 +454,27 @@ with t_map:
         st.cache_data.clear()
         st.rerun()
 
-    # ── Action Panel (below map, visible after tapping a pin) ─────────────
+    # ── Full panel (below map) — shows stats, wish list, and review form ────
     if st.session_state.selected_bakery:
         name = st.session_state.selected_bakery
         b_rows = df_raw[df_raw['Bakery Name'] == name]
-        if b_rows.empty:
-            st.session_state.selected_bakery = None
-        else:
-            b_data = b_rows.iloc[-1]   # most recent entry
-            is_merchant = st.session_state.merchant_bakery == name
+        if not b_rows.empty:
+            b_data = b_rows.iloc[-1]
+            is_merchant  = st.session_state.merchant_bakery == name
             is_best_value = (best_value_bakery == name)
             on_wish_list = name in st.session_state.wish_list
 
             st.divider()
 
-            # Bakery headline
+            # Bakery headline + badges
             title_extra = ""
             if is_best_value:
                 title_extra += ' <span class="badge badge-best">💚 Best Value</span>'
             if is_merchant:
                 title_extra += ' <span class="badge">🧑‍🍳 YOUR SHOP</span>'
-
             st.markdown(f"#### 📍 {name} {title_extra}", unsafe_allow_html=True)
 
-            # Per-bakery aggregated stats
+            # Stat cards
             if not stats_df.empty and name in stats_df['Bakery Name'].values:
                 bk = stats_df[stats_df['Bakery Name'] == name].iloc[0]
                 st.markdown(f"""
@@ -449,7 +497,7 @@ with t_map:
 
             st.divider()
 
-            # ── MERCHANT VIEW ─────────────────
+            # ── MERCHANT FORM ──────────────────
             if is_merchant:
                 st.subheader("🧑‍🍳 Update Your Shop")
                 with st.form("merchant_update"):
@@ -468,88 +516,54 @@ with t_map:
                         st.success("Broadcast sent!")
                         st.rerun()
 
-            # ── USER VIEW ─────────────────────
-            else:
-                if b_data['Stock'] <= 0:
-                    st.error(f"### 🚫 SOLD OUT at {name}")
-                    st.info(f"Last reported flavor: **{b_data['Fastelavnsbolle Type']}**")
-                else:
-                    st.success(f"✅ In Stock — {int(b_data['Stock'])} available · {b_data['Fastelavnsbolle Type']}")
+            # ── REVIEW FORM (shown once queue/fast-review is chosen) ───────
+            elif b_data['Stock'] > 0:
+                show_form = False
+                wait_val  = 0
 
-                    # Choose path: join line or fast review
-                    if (name not in st.session_state.arrival_times
-                            and st.session_state.review_mode != "instant"):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("🏁 Join the Queue", use_container_width=True):
-                                st.session_state.arrival_times[name] = {
-                                    "start": get_now_dk(), "wait": None
-                                }
-                                st.rerun()
-                        with c2:
-                            if st.button("🚀 Fast Review", use_container_width=True):
-                                st.session_state.review_mode = "instant"
-                                st.rerun()
-                    else:
-                        wait_val = 0
-                        show_form = False
+                if st.session_state.review_mode == "instant":
+                    show_form = True
+                elif name in st.session_state.arrival_times:
+                    entry = st.session_state.arrival_times[name]
+                    if entry["wait"] is not None:
+                        show_form = True
+                        wait_val  = entry["wait"]
 
-                        if st.session_state.review_mode == "instant":
-                            show_form = True
-                        elif name in st.session_state.arrival_times:
-                            entry = st.session_state.arrival_times[name]
-                            if entry["wait"] is None:
-                                w_now = (get_now_dk() - entry["start"]).seconds // 60
-                                st.info(f"⏱️ In queue: **{w_now} min** so far…")
-                                if st.button("🛍️ Got my bolle!", type="primary"):
-                                    st.session_state.arrival_times[name]["wait"] = max(1, w_now)
-                                    st.rerun()
-                            else:
-                                show_form = True
-                                wait_val = entry["wait"]
+                if show_form:
+                    st.markdown("#### ✍️ Your Review")
+                    with st.form("final_review", clear_on_submit=False):
+                        st.markdown("**📸 Add a photo** *(optional)*")
+                        uploaded_file = st.file_uploader(
+                            "Photo", type=['jpg', 'jpeg', 'png', 'webp'],
+                            label_visibility="collapsed"
+                        )
+                        t_f = st.text_input("Flavor", value=str(b_data['Fastelavnsbolle Type']))
+                        t_r = st.slider("Your Rating ⭐", 1.0, 5.0, 3.0, 0.25)
+                        t_p = st.number_input("Price paid (DKK)", 0, 200, int(b_data['Price']))
+                        t_c = st.text_area("Your review", placeholder="Flaky, sweet, cream-filled perfection…")
 
-                        if show_form:
-                            with st.form("final_review", clear_on_submit=False):
-                                st.markdown("**📸 Add a photo** *(optional — taken with your camera or uploaded)*")
-                                uploaded_file = st.file_uploader(
-                                    "Photo", type=['jpg', 'jpeg', 'png', 'webp'],
-                                    label_visibility="collapsed"
-                                )
-                                t_f = st.text_input("Flavor", value=str(b_data['Fastelavnsbolle Type']))
-                                t_r = st.slider("Your Rating ⭐", 1.0, 5.0, 3.0, 0.25)
-                                t_p = st.number_input("Price paid (DKK)", 0, 200, int(b_data['Price']))
-                                t_c = st.text_area("Your review", placeholder="Flaky, sweet, cream-filled perfection…")
-
-                                if st.form_submit_button("✅ Submit Review", type="primary", use_container_width=True):
-                                    with st.spinner("Uploading…"):
-                                        photo_url = upload_photo(uploaded_file)
-                                    row = [name, t_f, photo_url, str(b_data['Address']),
-                                           float(b_data['lat']), float(b_data['lon']),
-                                           get_now_dk().strftime("%Y-%m-%d"), "User",
-                                           str(st.session_state.user_nickname),
-                                           float(t_r), float(t_p), int(b_data['Stock']),
-                                           get_now_dk().strftime("%H:%M"), "", str(t_c),
-                                           int(wait_val)]
-                                    post_to_sheets(row)
-                                    if name in st.session_state.arrival_times:
-                                        del st.session_state.arrival_times[name]
-                                    st.session_state.review_mode = None
-                                    st.session_state.selected_bakery = None
-                                    st.cache_data.clear()
-                                    st.balloons()
-                                    new_df = load_data()
-                                    user_revs = new_df[new_df['User'] == st.session_state.user_nickname]
-                                    new_badges = compute_badges(user_revs)
-                                    if new_badges:
-                                        st.success("🎉 New badge unlocked!")
-                                    st.rerun()
-
-            if st.button("← Back to Map", use_container_width=True):
-                if name in st.session_state.arrival_times:
-                    del st.session_state.arrival_times[name]
-                st.session_state.review_mode = None
-                st.session_state.selected_bakery = None
-                st.rerun()
+                        if st.form_submit_button("✅ Submit Review", type="primary", use_container_width=True):
+                            with st.spinner("Uploading…"):
+                                photo_url = upload_photo(uploaded_file)
+                            row = [name, t_f, photo_url, str(b_data['Address']),
+                                   float(b_data['lat']), float(b_data['lon']),
+                                   get_now_dk().strftime("%Y-%m-%d"), "User",
+                                   str(st.session_state.user_nickname),
+                                   float(t_r), float(t_p), int(b_data['Stock']),
+                                   get_now_dk().strftime("%H:%M"), "", str(t_c),
+                                   int(wait_val)]
+                            post_to_sheets(row)
+                            if name in st.session_state.arrival_times:
+                                del st.session_state.arrival_times[name]
+                            st.session_state.review_mode = None
+                            st.session_state.selected_bakery = None
+                            st.cache_data.clear()
+                            st.balloons()
+                            new_df = load_data()
+                            user_revs = new_df[new_df['User'] == st.session_state.user_nickname]
+                            if compute_badges(user_revs):
+                                st.success("🎉 New badge unlocked!")
+                            st.rerun()
 
 # ══════════════════════════════════════════════
 # TAB: STREAM
