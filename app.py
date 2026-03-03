@@ -493,7 +493,7 @@ with t_map:
 
     m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
 
-    for _, r in latest.dropna(subset=['lat', 'lon']).iterrows():
+    for _, r in (latest.dropna(subset=['lat', 'lon']) if not latest.empty and 'lat' in latest.columns else pd.DataFrame()).iterrows():
         if r['lat'] == 0 and r['lon'] == 0:
             continue
         sold_out = r['Stock'] <= 0
