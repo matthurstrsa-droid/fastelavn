@@ -70,68 +70,24 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
-# PWA / Add to Home Screen prompt
-components.html("""
-<link rel="manifest" href="data:application/json,{
-  &quot;name&quot;: &quot;BolleQuest&quot;,
-  &quot;short_name&quot;: &quot;BolleQuest&quot;,
-  &quot;start_url&quot;: &quot;/&quot;,
-  &quot;display&quot;: &quot;standalone&quot;,
-  &quot;background_color&quot;: &quot;#1a0a00&quot;,
-  &quot;theme_color&quot;: &quot;#ffb347&quot;,
-  &quot;icons&quot;: []
-}">
-<script>
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    const banner = document.getElementById('a2hs-banner');
-    if (banner) banner.style.display = 'flex';
-});
-function installApp() {
-    if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then(() => {
-            deferredPrompt = null;
-            document.getElementById('a2hs-banner').style.display = 'none';
-        });
-    }
-}
-function dismissBanner() {
-    document.getElementById('a2hs-banner').style.display = 'none';
-    localStorage.setItem('a2hs_dismissed', '1');
-}
-window.addEventListener('load', () => {
-    if (localStorage.getItem('a2hs_dismissed')) return;
-    // iOS Safari doesn't fire beforeinstallprompt — show manual instructions instead
-    const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
-    const isInStandalone = window.navigator.standalone;
-    if (isIOS && !isInStandalone) {
-        const banner = document.getElementById('a2hs-banner');
-        if (banner) {
-            document.getElementById('a2hs-btn').style.display = 'none';
-            document.getElementById('a2hs-ios').style.display = 'inline';
-            banner.style.display = 'flex';
-        }
-    }
-});
-</script>
-<div id="a2hs-banner" style="display:none;align-items:center;gap:12px;
-     background:linear-gradient(135deg,#1a0a00,#3d1a00);color:#ffb347;
-     padding:12px 16px;border-radius:12px;margin-bottom:10px;font-family:sans-serif;font-size:14px;flex-wrap:wrap">
-  <span>🥐 <b>Add BolleQuest to your home screen</b> for the best experience</span>
-  <button id="a2hs-btn" onclick="installApp()"
-    style="background:#ffb347;color:#3d1a00;border:none;padding:6px 14px;border-radius:8px;font-weight:700;cursor:pointer">
-    Add to Home Screen
-  </button>
-  <span id="a2hs-ios" style="display:none;color:#ffd580">
-    Tap <b>Share ↑</b> then <b>"Add to Home Screen"</b>
-  </span>
-  <button onclick="dismissBanner()"
-    style="background:transparent;color:#c8895a;border:none;font-size:18px;cursor:pointer;margin-left:auto">✕</button>
-</div>
-""", height=70)
+# Add to Home Screen — simple informational banner (no PWA manifest needed)
+if not st.session_state.get("a2hs_dismissed"):
+    cols = st.columns([10, 1])
+    with cols[0]:
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#1a0a00,#3d1a00);color:#ffb347;
+                    padding:12px 18px;border-radius:12px;font-family:sans-serif;font-size:14px;
+                    display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          📱 <b>Add to your home screen:</b>
+          <span style="color:#ffd580">iPhone: tap <b>Share ↑</b> → "Add to Home Screen"</span>
+          &nbsp;·&nbsp;
+          <span style="color:#ffd580">Android: tap <b>⋮ menu</b> → "Add to Home Screen"</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with cols[1]:
+        if st.button("✕", key="a2hs_dismiss", help="Dismiss"):
+            st.session_state.a2hs_dismissed = True
+            st.rerun()
 
 # ─────────────────────────────────────────────
 # 2. HEADER
