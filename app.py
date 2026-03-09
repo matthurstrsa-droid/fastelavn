@@ -81,7 +81,7 @@ if not st.session_state.get("a2hs_dismissed"):
           📱 <b>Add to your home screen:</b>
           <span style="color:#ffd580">iPhone: tap <b>Share ↑</b> → "Add to Home Screen"</span>
           &nbsp;·&nbsp;
-          <span style="color:#ffd580">Android: tap <b>⋮ menu</b> → "Add to Home Screen"</span>
+          <span style="color:#ffd580">Android: tap <b>⋮ menu</b> → "Add to Home Screen" *(may be under "More options")*</span>
         </div>
         """, unsafe_allow_html=True)
     with cols[1]:
@@ -144,12 +144,14 @@ defaults = {
     "arrival_times": {},
     "selected_bakery": None,
     "merchant_bakery": None,
-    "user_nickname": "",          # empty — forces prompt on first review
+    "user_nickname": "",
     "review_mode": None,
     "user_filter": None,
     "wish_list": [],
     "onboarding_done": False,
     "nickname_set": False,
+    "a2hs_dismissed": False,
+    "show_coupon": None,   # bakery name whose coupon is being shown
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -181,6 +183,42 @@ def get_worksheet():
         "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
     ).get_worksheet(0)
 
+def get_discounts_worksheet():
+    """Returns worksheet index 1 (Discounts). Creates it if missing."""
+    wb = get_gs_client().open_by_key("1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo")
+    sheets = wb.worksheets()
+    if len(sheets) < 2:
+        ws = wb.add_worksheet(title="Discounts", rows=200, cols=6)
+        ws.append_row(["Bakery Name", "Discount Pct", "Description", "Valid Until", "Active"])
+        return ws
+    return sheets[1]
+
+@st.cache_data(ttl=60)
+def load_discounts():
+    try:
+        data = get_discounts_worksheet().get_all_records()
+        df = pd.DataFrame(data)
+        if df.empty:
+            return pd.DataFrame(columns=["Bakery Name","Discount Pct","Description","Valid Until","Active"])
+        df.columns = [c.strip() for c in df.columns]
+        df["Discount Pct"] = pd.to_numeric(df.get("Discount Pct", 0), errors='coerce').fillna(0)
+        for c in ["Description","Valid Until","Active","Bakery Name"]:
+            if c not in df.columns: df[c] = ""
+            df[c] = df[c].astype(str)
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["Bakery Name","Discount Pct","Description","Valid Until","Active"])
+
+def save_discount(bakery_name, pct, description, valid_until):
+    """Overwrite the existing row for this bakery, or append a new one."""
+    ws = get_discounts_worksheet()
+    data = ws.get_all_values()
+    for i, row in enumerate(data[1:], start=2):  # row 1 is header
+        if row and row[0] == bakery_name:
+            ws.update(f"A{i}:E{i}", [[bakery_name, pct, description, valid_until, "1"]])
+            return
+    ws.append_row([bakery_name, pct, description, valid_until, "1"])
+
 @st.cache_data(ttl=45)
 def load_data():
     try:
@@ -210,6 +248,7 @@ def load_data():
         return pd.DataFrame()
 
 df_raw = load_data()
+disc_df = load_discounts()
 
 # ─────────────────────────────────────────────
 # 6. CLOUDINARY CONFIG
@@ -301,10 +340,29 @@ if not df_raw.empty:
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 10. TABS
+# 10. NICKNAME PROMPT (shown above tabs when name not yet set)
 # ─────────────────────────────────────────────
-t_map, t_stream, t_top, t_wishlist, t_settings, t_help = st.tabs(
-    ["📍 Map", "🧵 Stream", "🏆 Rankings", "💛 Wish List", "⚙️ Settings", "❓ Help"]
+if not st.session_state.user_nickname.strip():
+    with st.container(border=True):
+        st.markdown("**👋 What should we call you?**")
+        st.caption("Your nickname appears on reviews and the leaderboard. You can change it anytime in Settings.")
+        col_n, col_b = st.columns([4, 1])
+        welcome_nick = col_n.text_input("Nickname", label_visibility="collapsed",
+                                        placeholder="e.g. CreamPuffCarla", key="welcome_nick")
+        if col_b.button("Let's go! 🥐", use_container_width=True):
+            if welcome_nick.strip():
+                st.session_state.user_nickname = welcome_nick.strip()
+                components.html(
+                    f"<script>localStorage.setItem('bq_nickname','{html.escape(welcome_nick.strip())}');</script>",
+                    height=0
+                )
+                st.rerun()
+
+# ─────────────────────────────────────────────
+# 11. TABS
+# ─────────────────────────────────────────────
+t_map, t_stream, t_top, t_wishlist, t_discounts, t_settings, t_help = st.tabs(
+    ["📍 Map", "🧵 Stream", "🏆 Rankings", "💛 Wish List", "🏷️ Discounts", "⚙️ Settings", "❓ Help"]
 )
 
 # ══════════════════════════════════════════════
@@ -839,6 +897,74 @@ with t_wishlist:
                     st.rerun()
 
 # ══════════════════════════════════════════════
+# TAB: DISCOUNTS
+# ══════════════════════════════════════════════
+with t_discounts:
+    st.subheader("🏷️ BolleQuest Deals")
+
+    # ── Coupon screen: full-screen view for showing at the counter ─────────
+    if st.session_state.show_coupon:
+        bakery = st.session_state.show_coupon
+        d_row  = disc_df[disc_df['Bakery Name'] == bakery]
+        if not d_row.empty:
+            d = d_row.iloc[-1]
+            pct  = int(float(d['Discount Pct']))
+            desc = esc(d['Description'])
+            # Rotating code: changes every 5 minutes so screenshots can't be reused
+            code_seed = int(get_now_dk().timestamp() // 300)
+            code = hashlib.sha256(f"{bakery}{code_seed}".encode()).hexdigest()[:6].upper()
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#1a0a00,#3d1a00);color:#ffb347;
+                        border-radius:20px;padding:40px 28px;text-align:center;margin-bottom:20px">
+              <div style="font-size:1rem;color:#c8895a;margin-bottom:4px">🏷️ BolleQuest Exclusive Deal</div>
+              <div style="font-family:'Syne',sans-serif;font-size:2.2rem;font-weight:800;
+                          margin:10px 0">{esc(bakery)}</div>
+              <div style="font-size:4rem;font-weight:900;color:#ffb347;
+                          line-height:1.1">{pct}% OFF</div>
+              <div style="color:#ffd580;font-size:1rem;margin:10px 0">{desc}</div>
+              <div style="background:#fff8f2;color:#3d1a00;border-radius:12px;
+                          padding:12px 20px;margin-top:20px;display:inline-block">
+                <div style="font-size:0.75rem;color:#888;margin-bottom:4px">SHOW THIS CODE AT THE COUNTER</div>
+                <div style="font-family:monospace;font-size:2rem;font-weight:800;
+                            letter-spacing:6px">{code}</div>
+                <div style="font-size:0.7rem;color:#aaa;margin-top:4px">Refreshes every 5 min · @{esc(st.session_state.user_nickname)}</div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("← Back to Deals", use_container_width=True):
+                st.session_state.show_coupon = None
+                st.rerun()
+        st.stop()
+
+    # ── Deals list ─────────────────────────────────────────────────────────
+    active_deals = disc_df[disc_df['Active'] == '1']
+    if active_deals.empty:
+        st.info("No deals yet — check back soon! Bakeries can add deals in their merchant settings.")
+    else:
+        for _, d in active_deals.iterrows():
+            pct  = int(float(d['Discount Pct']))
+            desc = esc(d['Description'])
+            until = esc(d['Valid Until'])
+            bname = esc(d['Bakery Name'])
+            col_a, col_b = st.columns([4, 1])
+            with col_a:
+                st.markdown(f"""
+                <div style="background:#fff8f2;border:2px solid #ffb347;border-radius:14px;
+                            padding:16px 18px;margin-bottom:10px">
+                  <div style="font-family:'Syne',sans-serif;font-size:1.4rem;color:#b84a00;
+                               font-weight:800">{pct}% OFF</div>
+                  <div style="font-weight:700;font-size:1rem">{bname}</div>
+                  <div style="color:#666;font-size:0.9rem">{desc}</div>
+                  {'<div style="color:#aaa;font-size:0.78rem;margin-top:4px">Valid until ' + until + '</div>' if until and until != 'nan' else ''}
+                </div>
+                """, unsafe_allow_html=True)
+            with col_b:
+                if st.button("Show", key=f"coup_{d['Bakery Name']}", use_container_width=True,
+                             type="primary"):
+                    st.session_state.show_coupon = d['Bakery Name']
+                    st.rerun()
+
+# ══════════════════════════════════════════════
 # TAB: SETTINGS
 # ══════════════════════════════════════════════
 with t_settings:
@@ -875,29 +1001,57 @@ with t_settings:
         b_rows = df_raw[df_raw['Bakery Name'] == name]
         if not b_rows.empty:
             b_data = b_rows.iloc[-1]
-            st.markdown("##### Update Your Shop")
-            with st.form("merchant_update_settings"):
-                new_stock  = st.number_input("Current Stock", 0, 1000, int(b_data['Stock']))
-                new_flavor = st.text_input("Today's Featured Flavor", value=str(b_data['Fastelavnsbolle Type']))
-                new_price  = st.number_input("Price (DKK)", 0, 200, int(b_data['Price']))
-                new_hours  = st.text_input("Opening Hours (e.g. Mon–Fri 7–18, Sat 8–15)",
-                                           value=str(b_data.get('Opening Hours', '')))
-                m_comm     = st.text_area("Merchant Note (e.g. 'Next batch at 2pm!')", value="")
-                if st.form_submit_button("📡 Broadcast Update", use_container_width=True, type="primary"):
-                    row = [name, new_flavor, "", str(b_data['Address']),
-                           float(b_data['lat']), float(b_data['lon']),
-                           get_now_dk().strftime("%Y-%m-%d"), "Merchant", name,
-                           5.0, new_price, new_stock,
-                           get_now_dk().strftime("%H:%M"), new_hours, m_comm, 0]
-                    post_to_sheets(row)
-                    st.cache_data.clear()
-                    st.toast("📡 Broadcast sent!", icon="✅")
-                    st.rerun()
+
+            tab_update, tab_discount = st.tabs(["📡 Broadcast Update", "🏷️ Manage Deal"])
+
+            with tab_update:
+                with st.form("merchant_update_settings"):
+                    new_stock  = st.number_input("Current Stock", 0, 1000, int(b_data['Stock']))
+                    new_flavor = st.text_input("Today's Featured Flavor", value=str(b_data['Fastelavnsbolle Type']))
+                    new_price  = st.number_input("Price (DKK)", 0, 200, int(b_data['Price']))
+                    new_hours  = st.text_input("Opening Hours (e.g. Mon–Fri 7–18, Sat 8–15)",
+                                               value=str(b_data.get('Opening Hours', '')))
+                    m_comm     = st.text_area("Merchant Note (e.g. 'Next batch at 2pm!')", value="")
+                    if st.form_submit_button("📡 Broadcast Update", use_container_width=True, type="primary"):
+                        row = [name, new_flavor, "", str(b_data['Address']),
+                               float(b_data['lat']), float(b_data['lon']),
+                               get_now_dk().strftime("%Y-%m-%d"), "Merchant", name,
+                               5.0, new_price, new_stock,
+                               get_now_dk().strftime("%H:%M"), new_hours, m_comm, 0]
+                        post_to_sheets(row)
+                        st.cache_data.clear()
+                        st.toast("📡 Broadcast sent!", icon="✅")
+                        st.rerun()
+
+            with tab_discount:
+                existing = disc_df[disc_df['Bakery Name'] == name]
+                ex = existing.iloc[-1] if not existing.empty else None
+                with st.form("merchant_discount"):
+                    st.markdown("Set a discount that customers can show at your counter.")
+                    d_pct   = st.number_input("Discount %", 0, 100,
+                                              int(float(ex['Discount Pct'])) if ex is not None else 10)
+                    d_desc  = st.text_input("Deal description", value=str(ex['Description']) if ex is not None else "",
+                                            placeholder="e.g. Free coffee with any bolle!")
+                    d_until = st.text_input("Valid until (optional)", value=str(ex['Valid Until']) if ex is not None else "",
+                                            placeholder="e.g. 4 March 2026")
+                    d_active = st.checkbox("Deal is active", value=(ex is not None and str(ex['Active']) == '1'))
+                    if st.form_submit_button("💾 Save Deal", use_container_width=True, type="primary"):
+                        save_discount(name, d_pct, d_desc, d_until)
+                        ws = get_discounts_worksheet()
+                        data = ws.get_all_values()
+                        for i, row in enumerate(data[1:], start=2):
+                            if row and row[0] == name:
+                                ws.update(f"E{i}", [["1" if d_active else "0"]])
+                                break
+                        st.cache_data.clear()
+                        st.toast("💾 Deal saved!", icon="✅")
+                        st.rerun()
 
         if st.button("🚪 Log Out"):
             st.session_state.merchant_bakery = None
             st.rerun()
     else:
+        st.markdown("**Log in with your key:**")
         k_in = st.text_input("Bakery Secret Key", type="password")
         if st.button("🔑 Unlock Merchant Tools"):
             if not df_raw.empty and k_in:
@@ -908,6 +1062,47 @@ with t_settings:
                     st.rerun()
                 else:
                     st.error("Key not recognised.")
+
+        st.divider()
+        with st.expander("🏪 Register your bakery"):
+            st.markdown(
+                "Don't have a key yet? Register here — your bakery will appear on the map "
+                "once we've verified your location (usually within 24 hours)."
+            )
+            with st.form("bakery_register"):
+                reg_name    = st.text_input("Bakery name")
+                reg_address = st.text_input("Address")
+                reg_flavor  = st.text_input("Your signature bolle flavor", placeholder="e.g. Hindbær/Vanilje")
+                reg_price   = st.number_input("Price (DKK)", 10, 200, 45)
+                reg_hours   = st.text_input("Opening hours", placeholder="Mon–Fri 7–18, Sat 8–15")
+                reg_pass    = st.text_input("Choose a login password", type="password")
+                reg_pass2   = st.text_input("Confirm password", type="password")
+                if st.form_submit_button("📝 Register", use_container_width=True, type="primary"):
+                    if not reg_name.strip():
+                        st.error("Please enter your bakery name.")
+                    elif not reg_pass.strip():
+                        st.error("Please choose a password.")
+                    elif reg_pass != reg_pass2:
+                        st.error("Passwords don't match.")
+                    elif not df_raw.empty and (df_raw['Bakery Name'] == reg_name.strip()).any():
+                        st.error("That bakery name is already registered. Contact us if this is your bakery.")
+                    else:
+                        hashed_new = hash_key(reg_pass)
+                        row = [reg_name.strip(), reg_flavor, "", reg_address.strip(),
+                               0, 0,
+                               get_now_dk().strftime("%Y-%m-%d"), "Registration",
+                               reg_name.strip(), 0, reg_price, 0,
+                               get_now_dk().strftime("%H:%M"), reg_hours,
+                               "Awaiting map placement", hashed_new]
+                        post_to_sheets(row)
+                        st.cache_data.clear()
+                        st.success(
+                            f"✅ **{reg_name.strip()}** registered! You can log in with your password now. "
+                            "We'll add you to the map shortly."
+                        )
+                        # Auto-log them in
+                        st.session_state.merchant_bakery = reg_name.strip()
+                        st.rerun()
 
 # ══════════════════════════════════════════════
 # TAB: HELP
@@ -947,8 +1142,13 @@ with t_help:
 Awarded to the bakery with the highest rating-to-price ratio. Updated live.
 
 **Add to Home Screen 📱**
-On iPhone: tap Share ↑ → "Add to Home Screen". On Android: tap ⋮ → "Add to Home Screen".
+On iPhone: tap Share ↑ → "Add to Home Screen". On Android: tap ⋮ menu → "Add to Home Screen" *(may be under "More options")*.
+
+**Discounts 🏷️**
+Check the Discounts tab for exclusive deals. Tap "Show" to display your coupon code at the counter — codes rotate every 5 minutes so they can't be reused from a screenshot.
 
 **For bakeries 🧑‍🍳**
-Enter your secret key in ⚙️ Settings to update stock, price, flavor and opening hours.
+- Already have a key? Enter it in ⚙️ Settings → Merchant Access.
+- New bakery? Use the "Register your bakery" form — you choose your own password and get immediate access. We'll add you to the map within 24 hours.
+- Once logged in, use **Broadcast Update** to update stock, price and flavor, and **Manage Deal** to set a discount for BolleQuest users.
     """)
