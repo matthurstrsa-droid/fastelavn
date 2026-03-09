@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
@@ -9,112 +10,128 @@ import pytz
 import numpy as np
 import cloudinary
 import cloudinary.uploader
+import html
+import hashlib
 
 # ─────────────────────────────────────────────
-# 1. PAGE CONFIG & MOBILE-FRIENDLY CSS
+# 1. PAGE CONFIG & CSS
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BolleQuest", page_icon="🥐", layout="wide")
 
 st.markdown("""
 <style>
-/* ── Google Font ── */
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
-}
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 
-/* ── Header ── */
 .bq-header {
     background: linear-gradient(135deg, #1a0a00 0%, #3d1a00 60%, #7a3300 100%);
-    border-radius: 16px;
-    padding: 20px 28px 16px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
+    border-radius: 16px; padding: 20px 28px 16px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 16px;
     box-shadow: 0 8px 32px rgba(122,51,0,0.3);
 }
-.bq-header h1 {
-    font-family: 'Syne', sans-serif;
-    font-size: 2rem;
-    color: #ffb347;
-    margin: 0;
-    letter-spacing: -0.5px;
-}
-.bq-header p { color: #c8895a; margin: 0; font-size: 0.9rem; }
+.bq-header h1 { font-family: 'Syne', sans-serif; font-size: 2rem; color: #ffb347; margin: 0; letter-spacing: -0.5px; }
+.bq-header p  { color: #c8895a; margin: 0; font-size: 0.9rem; }
 
-/* ── Stat cards ── */
 .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .stat-card {
-    background: #fff8f2;
-    border: 1.5px solid #ffe0c0;
-    border-radius: 12px;
-    padding: 12px 18px;
-    flex: 1;
-    min-width: 120px;
-    text-align: center;
+    background: #fff8f2; border: 1.5px solid #ffe0c0; border-radius: 12px;
+    padding: 12px 18px; flex: 1; min-width: 120px; text-align: center;
 }
 .stat-card .val { font-family: 'Syne', sans-serif; font-size: 1.6rem; color: #b84a00; }
 .stat-card .lbl { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
 
-/* ── Badge pill ── */
 .badge {
-    display: inline-block;
-    background: linear-gradient(90deg, #ffb347, #ff7e00);
-    color: #3d1a00;
-    font-weight: 700;
-    font-size: 0.72rem;
-    border-radius: 20px;
-    padding: 3px 10px;
-    margin: 2px 3px;
-    letter-spacing: 0.3px;
+    display: inline-block; background: linear-gradient(90deg, #ffb347, #ff7e00);
+    color: #3d1a00; font-weight: 700; font-size: 0.72rem;
+    border-radius: 20px; padding: 3px 10px; margin: 2px 3px; letter-spacing: 0.3px;
 }
 .badge-silver { background: linear-gradient(90deg, #d0d0d0, #a0a0a0); color: #222; }
 .badge-gold   { background: linear-gradient(90deg, #ffe066, #ffb700); color: #3d1a00; }
 .badge-best   { background: linear-gradient(90deg, #43e97b, #38f9d7); color: #064e3b; }
 
-/* ── Review card ── */
 .review-card {
-    background: #fff;
-    border: 1.5px solid #ffe0c0;
-    border-radius: 14px;
-    padding: 16px;
-    margin-bottom: 14px;
-    box-shadow: 0 2px 8px rgba(184,74,0,0.06);
+    background: #fff; border: 1.5px solid #ffe0c0; border-radius: 14px;
+    padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(184,74,0,0.06);
 }
-.review-card .meta { color: #b84a00; font-size: 0.82rem; margin-bottom: 6px; }
-.review-card .stars { font-size: 1.1rem; }
-.review-card .comment { color: #444; margin-top: 8px; font-size: 0.93rem; }
+.review-card .meta   { color: #b84a00; font-size: 0.82rem; margin-bottom: 6px; }
+.review-card .stars  { font-size: 1.1rem; }
+.review-card .comment{ color: #444; margin-top: 8px; font-size: 0.93rem; }
 
-/* ── Filter panel ── */
-.filter-panel {
-    background: #fff8f2;
-    border: 1.5px solid #ffe0c0;
-    border-radius: 14px;
-    padding: 16px 20px;
-    margin-bottom: 16px;
+.onboarding-banner {
+    background: linear-gradient(135deg, #fff8f2, #ffe8cc);
+    border: 2px solid #ffb347; border-radius: 16px; padding: 18px 22px; margin-bottom: 16px;
 }
 
-/* ── Wish list ── */
-.wish-tag {
-    background: #fff0f0;
-    border: 1px solid #ffcccc;
-    color: #cc2200;
-    border-radius: 20px;
-    padding: 3px 10px;
-    font-size: 0.78rem;
-    margin: 2px;
-    display: inline-block;
-}
-
-/* ── Mobile: tighten padding ── */
 @media (max-width: 640px) {
     .bq-header h1 { font-size: 1.4rem; }
     .stat-card .val { font-size: 1.2rem; }
 }
 </style>
 """, unsafe_allow_html=True)
+
+# PWA / Add to Home Screen prompt
+components.html("""
+<link rel="manifest" href="data:application/json,{
+  &quot;name&quot;: &quot;BolleQuest&quot;,
+  &quot;short_name&quot;: &quot;BolleQuest&quot;,
+  &quot;start_url&quot;: &quot;/&quot;,
+  &quot;display&quot;: &quot;standalone&quot;,
+  &quot;background_color&quot;: &quot;#1a0a00&quot;,
+  &quot;theme_color&quot;: &quot;#ffb347&quot;,
+  &quot;icons&quot;: []
+}">
+<script>
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    const banner = document.getElementById('a2hs-banner');
+    if (banner) banner.style.display = 'flex';
+});
+function installApp() {
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(() => {
+            deferredPrompt = null;
+            document.getElementById('a2hs-banner').style.display = 'none';
+        });
+    }
+}
+function dismissBanner() {
+    document.getElementById('a2hs-banner').style.display = 'none';
+    localStorage.setItem('a2hs_dismissed', '1');
+}
+window.addEventListener('load', () => {
+    if (localStorage.getItem('a2hs_dismissed')) return;
+    // iOS Safari doesn't fire beforeinstallprompt — show manual instructions instead
+    const isIOS = /iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase());
+    const isInStandalone = window.navigator.standalone;
+    if (isIOS && !isInStandalone) {
+        const banner = document.getElementById('a2hs-banner');
+        if (banner) {
+            document.getElementById('a2hs-btn').style.display = 'none';
+            document.getElementById('a2hs-ios').style.display = 'inline';
+            banner.style.display = 'flex';
+        }
+    }
+});
+</script>
+<div id="a2hs-banner" style="display:none;align-items:center;gap:12px;
+     background:linear-gradient(135deg,#1a0a00,#3d1a00);color:#ffb347;
+     padding:12px 16px;border-radius:12px;margin-bottom:10px;font-family:sans-serif;font-size:14px;flex-wrap:wrap">
+  <span>🥐 <b>Add BolleQuest to your home screen</b> for the best experience</span>
+  <button id="a2hs-btn" onclick="installApp()"
+    style="background:#ffb347;color:#3d1a00;border:none;padding:6px 14px;border-radius:8px;font-weight:700;cursor:pointer">
+    Add to Home Screen
+  </button>
+  <span id="a2hs-ios" style="display:none;color:#ffd580">
+    Tap <b>Share ↑</b> then <b>"Add to Home Screen"</b>
+  </span>
+  <button onclick="dismissBanner()"
+    style="background:transparent;color:#c8895a;border:none;font-size:18px;cursor:pointer;margin-left:auto">✕</button>
+</div>
+""", height=70)
 
 # ─────────────────────────────────────────────
 # 2. HEADER
@@ -135,33 +152,34 @@ st.markdown("""
 def get_now_dk():
     return datetime.now(pytz.timezone('Europe/Copenhagen'))
 
+def esc(s):
+    """HTML-escape user-supplied strings to prevent XSS."""
+    return html.escape(str(s))
+
 def stars(rating):
     full = int(round(rating))
     return "⭐" * full + "☆" * (5 - full)
 
+def hash_key(k):
+    return hashlib.sha256(str(k).encode()).hexdigest()
+
 def compute_badges(user_reviews: pd.DataFrame) -> list[str]:
-    """Return list of badge HTML strings for a user."""
     badges = []
     n = len(user_reviews)
-    if n >= 1:   badges.append('<span class="badge">🥐 First Bite</span>')
-    if n >= 5:   badges.append('<span class="badge badge-silver">🔍 Bolle Scout</span>')
-    if n >= 10:  badges.append('<span class="badge badge-gold">🏆 Bolle Veteran</span>')
-    if n >= 25:  badges.append('<span class="badge badge-gold">👑 Bolle Legend</span>')
-
-    # Early Bird: any review before 09:00
-    early = user_reviews[user_reviews['Time'] < "09:00"]
-    if not early.empty:
+    if n >= 1:  badges.append('<span class="badge">🥐 First Bite</span>')
+    if n >= 5:  badges.append('<span class="badge badge-silver">🔍 Bolle Scout</span>')
+    if n >= 10: badges.append('<span class="badge badge-gold">🏆 Bolle Veteran</span>')
+    if n >= 25: badges.append('<span class="badge badge-gold">👑 Bolle Legend</span>')
+    if not user_reviews[user_reviews['Time'] < "09:00"].empty:
         badges.append('<span class="badge">🌅 Early Bird</span>')
-
-    # Adventurer: 5+ different bakeries
     if user_reviews['Bakery Name'].nunique() >= 5:
         badges.append('<span class="badge badge-silver">🗺️ Adventurer</span>')
-
-    # Photographer: uploaded at least one photo
     if user_reviews['Photo URL'].astype(str).str.startswith('http').any():
         badges.append('<span class="badge">📸 Shutterbug</span>')
-
     return badges
+
+def share_text(bakery, rating, url="https://bollequest.streamlit.app"):
+    return f"I rated {bakery} ⭐{rating:.1f} on BolleQuest! {url}"
 
 # ─────────────────────────────────────────────
 # 4. SESSION STATE
@@ -170,15 +188,29 @@ defaults = {
     "arrival_times": {},
     "selected_bakery": None,
     "merchant_bakery": None,
-    "user_nickname": "BunHunter",
+    "user_nickname": "",          # empty — forces prompt on first review
     "review_mode": None,
     "user_filter": None,
-    "wish_list": [],         # list of bakery names
-    "show_filters": False,
+    "wish_list": [],
+    "onboarding_done": False,
+    "nickname_set": False,
 }
 for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
+
+# Persist nickname + wish list via localStorage
+components.html("""
+<script>
+// On load: push saved values up to Streamlit via query params
+const nick = localStorage.getItem('bq_nickname');
+const wl   = localStorage.getItem('bq_wishlist');
+if (nick) {
+    const inp = window.parent.document.querySelector('input[aria-label="nickname_restore"]');
+    if (inp) { inp.value = nick; inp.dispatchEvent(new Event('input', {bubbles:true})); }
+}
+</script>
+""", height=0)
 
 # ─────────────────────────────────────────────
 # 5. DATA CONNECTION
@@ -193,7 +225,7 @@ def get_worksheet():
         "1gZfSgfa9xHLentpYHcoTb4rg_RJv2HItHcco85vNwBo"
     ).get_worksheet(0)
 
-@st.cache_data(ttl=45)   # 45 s — sane for Sheets API quota
+@st.cache_data(ttl=45)
 def load_data():
     try:
         data = get_worksheet().get_all_records()
@@ -206,13 +238,16 @@ def load_data():
                     'Address', 'Date', 'Time', 'Category', 'User', 'Bakery Key',
                     'Opening Hours']
         for col in num_cols:
-            if col not in df.columns:
-                df[col] = 0
+            if col not in df.columns: df[col] = 0
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         for col in str_cols:
-            if col not in df.columns:
-                df[col] = ""
+            if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str)
+        # Hash any unhashed bakery keys (idempotent — already-hashed values are 64 hex chars)
+        if 'Bakery Key' in df.columns:
+            df['Bakery Key'] = df['Bakery Key'].apply(
+                lambda k: k if len(k) == 64 else hash_key(k)
+            )
         return df
     except Exception as e:
         st.error(f"Data sync error: {e}")
@@ -234,13 +269,11 @@ except Exception:
     _cloudinary_ok = False
 
 def upload_photo(file) -> str:
-    """Upload to Cloudinary and return secure URL, or '' on failure."""
     if not _cloudinary_ok or file is None:
         return ""
     try:
         result = cloudinary.uploader.upload(
-            file,
-            folder="bollquest",
+            file, folder="bollquest",
             transformation=[{"width": 800, "crop": "limit", "quality": "auto"}],
         )
         return result.get("secure_url", "")
@@ -254,8 +287,8 @@ def upload_photo(file) -> str:
 def post_to_sheets(row_list):
     sanitized = []
     for item in row_list:
-        if isinstance(item, (np.int64, np.int32)):    sanitized.append(int(item))
-        elif isinstance(item, (np.float64, np.float32)): sanitized.append(float(item))
+        if isinstance(item, (np.int64, np.int32)):        sanitized.append(int(item))
+        elif isinstance(item, (np.float64, np.float32)):  sanitized.append(float(item))
         elif item is None or (isinstance(item, float) and np.isnan(item)):
             sanitized.append("")
         else:
@@ -266,7 +299,6 @@ def post_to_sheets(row_list):
 # 8. DERIVED METRICS
 # ─────────────────────────────────────────────
 def bakery_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate per-bakery stats including Best Value score."""
     if df.empty:
         return pd.DataFrame()
     grp = df[df['Rating'] > 0].groupby('Bakery Name').agg(
@@ -277,7 +309,6 @@ def bakery_stats(df: pd.DataFrame) -> pd.DataFrame:
         latest_stock=('Stock', 'last'),
         latest_flavor=('Fastelavnsbolle Type', 'last'),
     ).reset_index()
-    # Best Value = rating / log(price+1)  — rewards high rating at low price
     grp['value_score'] = grp.apply(
         lambda r: r['avg_rating'] / np.log1p(max(r['avg_price'], 1)), axis=1
     )
@@ -294,7 +325,8 @@ best_value_bakery = (
 # ─────────────────────────────────────────────
 today_str = get_now_dk().strftime("%Y-%m-%d")
 if not df_raw.empty:
-    today_df = df_raw[df_raw['Date'] == today_str]
+    # Only user reviews for stats (exclude merchant broadcasts which use Rating=5.0)
+    today_df = df_raw[(df_raw['Date'] == today_str) & (df_raw['Category'] == 'User')]
     total_reviews_today = len(today_df)
     avg_rating_today = today_df['Rating'].mean() if not today_df.empty else 0
     top_flavor_today = (
@@ -308,7 +340,7 @@ if not df_raw.empty:
       <div class="stat-card"><div class="val">{total_reviews_today}</div><div class="lbl">Reviews Today</div></div>
       <div class="stat-card"><div class="val">{avg_rating_today:.1f} ⭐</div><div class="lbl">Avg Rating</div></div>
       <div class="stat-card"><div class="val">{in_stock_count}</div><div class="lbl">In Stock Now</div></div>
-      <div class="stat-card"><div class="val" style="font-size:1rem">{top_flavor_today[:14]}</div><div class="lbl">Trending Flavor</div></div>
+      <div class="stat-card"><div class="val" style="font-size:1rem">{top_flavor_today[:18]}</div><div class="lbl">Trending Flavor</div></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -324,9 +356,22 @@ t_map, t_stream, t_top, t_wishlist, t_settings, t_help = st.tabs(
 # ══════════════════════════════════════════════
 with t_map:
 
-    # ── Filters ──────────────────────────────
+    # ── Onboarding banner (first visit only) ──
+    if not st.session_state.onboarding_done:
+        st.markdown("""
+        <div class="onboarding-banner">
+          <b style="font-size:1.1rem">👋 Welcome to BolleQuest!</b><br>
+          <span style="color:#666">Track Copenhagen's fastelavnsbolle in real time — find bakeries on the map,
+          join the queue, rate your bolle, and earn badges. Green pins = in stock,
+          red = sold out, dark green ★ = best value.</span>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Got it! 🥐", key="onboarding_dismiss"):
+            st.session_state.onboarding_done = True
+            st.rerun()
+
+    # ── Filters ───────────────────────────────
     with st.expander("🎛️ Filters", expanded=False):
-        st.markdown('<div class="filter-panel">', unsafe_allow_html=True)
         col_s, col_r, col_p = st.columns(3)
         with col_s:
             search_q = st.text_input("🔍 Search bakery / flavor", "").lower().strip()
@@ -335,7 +380,6 @@ with t_map:
         with col_p:
             max_price = st.slider("💰 Max price (DKK)", 10, 200, 200, 5)
         hide_sold_out = st.checkbox("🚫 Hide sold-out bakeries", value=False)
-        st.markdown('</div>', unsafe_allow_html=True)
 
     # Apply filters
     filtered = df_raw.copy()
@@ -347,46 +391,42 @@ with t_map:
             ).str.lower()
             filtered = filtered[corpus.str.contains(search_q, na=False)]
         if min_rating > 0:
-            # Only filter bakeries that have at least one review meeting the threshold
-            passing = (
-                filtered[filtered['Rating'] >= min_rating]['Bakery Name'].unique()
-                if min_rating > 0 else filtered['Bakery Name'].unique()
-            )
+            passing = filtered[filtered['Rating'] >= min_rating]['Bakery Name'].unique()
             filtered = filtered[filtered['Bakery Name'].isin(passing)]
         if max_price < 200:
             filtered = filtered[filtered['Price'] <= max_price]
         if hide_sold_out:
-            # Filter based on LATEST stock per bakery, not per row
             latest_stock = (
                 filtered.sort_values(['Bakery Name', 'Date', 'Time'])
-                .groupby('Bakery Name')['Stock']
-                .last()
+                .groupby('Bakery Name')['Stock'].last()
             )
             in_stock_bakeries = latest_stock[latest_stock > 0].index
             filtered = filtered[filtered['Bakery Name'].isin(in_stock_bakeries)]
 
-    # ── Compact action strip — appears above map when a bakery is selected ──
+    # ── Action strip ──────────────────────────
     if st.session_state.selected_bakery:
         name = st.session_state.selected_bakery
         b_rows = df_raw[df_raw['Bakery Name'] == name]
         if not b_rows.empty:
-            b_data = b_rows.iloc[-1]
-            sold_out = b_data['Stock'] <= 0
-            in_queue = name in st.session_state.arrival_times
-            in_fast  = st.session_state.review_mode == "instant"
-            got_bolle = in_queue and st.session_state.arrival_times[name].get("wait") is not None
+            b_data     = b_rows.iloc[-1]
+            sold_out   = b_data['Stock'] <= 0
+            in_queue   = name in st.session_state.arrival_times
+            in_fast    = st.session_state.review_mode == "instant"
+            got_bolle  = in_queue and st.session_state.arrival_times[name].get("wait") is not None
 
             stock_badge = "🔴 Sold out" if sold_out else f"🟢 {int(b_data['Stock'])} left"
             st.markdown(f"""
             <div style="background:#fff8f2;border:2px solid #ffb347;border-radius:14px;
                         padding:14px 18px;margin-bottom:10px;">
               <div style="font-size:1.1rem;font-weight:700;color:#3d1a00">
-                📍 {name} &nbsp; <span style="font-size:0.85rem;font-weight:400;color:#888">{stock_badge} · 🍩 {b_data['Fastelavnsbolle Type']} · 💰 {int(b_data['Price'])} kr</span>
+                📍 {esc(name)} &nbsp;
+                <span style="font-size:0.85rem;font-weight:400;color:#888">
+                  {stock_badge} · 🍩 {esc(b_data['Fastelavnsbolle Type'])} · 💰 {int(b_data['Price'])} kr
+                </span>
               </div>
             </div>
             """, unsafe_allow_html=True)
 
-            # ── State: nothing started yet ──
             if not sold_out and not in_queue and not in_fast:
                 ca, cb, cc = st.columns([2, 2, 1])
                 with ca:
@@ -401,8 +441,8 @@ with t_map:
                     if st.button("✖", use_container_width=True, key="strip_close"):
                         st.session_state.selected_bakery = None
                         st.rerun()
+                st.caption("*Queue: we time your wait · Fast: already eaten? Skip straight to the review*")
 
-            # ── State: in queue, waiting ──
             elif in_queue and not got_bolle:
                 w_now = (get_now_dk() - st.session_state.arrival_times[name]["start"]).seconds // 60
                 ca, cb, cc = st.columns([3, 2, 1])
@@ -417,11 +457,8 @@ with t_map:
                         st.session_state.selected_bakery = None
                         st.rerun()
 
-            # ── State: review form active (got bolle OR fast review) ──
             else:
                 wait_val = st.session_state.arrival_times[name]["wait"] if got_bolle else 0
-
-                # Allow starting over (join queue / fast review again)
                 ca, cb, cc = st.columns([2, 2, 1])
                 with ca:
                     if st.button("🏁 Queue Again", use_container_width=True, key="strip_requeue"):
@@ -444,7 +481,38 @@ with t_map:
                         st.session_state.selected_bakery = None
                         st.rerun()
 
-                # Review form rendered HERE — above the map
+                # ── Nickname gate ──────────────────────────────────────────
+                nickname = st.session_state.user_nickname.strip()
+                if not nickname or nickname == "BunHunter":
+                    st.warning("👋 Pick a nickname before submitting your review!")
+                    new_nick = st.text_input("Your nickname", key="nickname_gate",
+                                             placeholder="e.g. CreamPuffCarla")
+                    if st.button("Set Nickname & Continue", key="set_nick_btn"):
+                        if new_nick.strip():
+                            st.session_state.user_nickname = new_nick.strip()
+                            st.session_state.nickname_set = True
+                            # Persist to localStorage
+                            components.html(f"""
+                            <script>localStorage.setItem('bq_nickname', '{new_nick.strip()}');</script>
+                            """, height=0)
+                            st.rerun()
+                    st.stop()
+
+                # ── Rate limit: soft block same bakery same day ────────────
+                if not df_raw.empty:
+                    already = df_raw[
+                        (df_raw['User'] == nickname) &
+                        (df_raw['Bakery Name'] == name) &
+                        (df_raw['Date'] == today_str) &
+                        (df_raw['Category'] == 'User')
+                    ]
+                    if not already.empty:
+                        st.warning(
+                            f"⚠️ You've already reviewed **{name}** today. "
+                            "Submit another if you visited again!"
+                        )
+
+                # ── Review form ────────────────────────────────────────────
                 st.markdown("#### ✍️ Your Review")
                 with st.form("final_review", clear_on_submit=False):
                     st.markdown("**📸 Add a photo** *(optional)*")
@@ -462,11 +530,9 @@ with t_map:
                             photo_url = upload_photo(uploaded_file)
                         row = [name, t_f, photo_url, str(b_data['Address']),
                                float(b_data['lat']), float(b_data['lon']),
-                               get_now_dk().strftime("%Y-%m-%d"), "User",
-                               str(st.session_state.user_nickname),
+                               get_now_dk().strftime("%Y-%m-%d"), "User", nickname,
                                float(t_r), float(t_p), int(b_data['Stock']),
-                               get_now_dk().strftime("%H:%M"), "", str(t_c),
-                               int(wait_val)]
+                               get_now_dk().strftime("%H:%M"), "", str(t_c), int(wait_val)]
                         post_to_sheets(row)
                         if name in st.session_state.arrival_times:
                             del st.session_state.arrival_times[name]
@@ -474,60 +540,60 @@ with t_map:
                         st.session_state.selected_bakery = None
                         st.cache_data.clear()
                         st.balloons()
-                        new_df = load_data()
-                        user_revs = new_df[new_df['User'] == st.session_state.user_nickname]
-                        if compute_badges(user_revs):
-                            st.success("🎉 New badge unlocked!")
+                        # Badge unlock — only notify if badge count increased
+                        old_count = len(compute_badges(
+                            df_raw[df_raw['User'] == nickname]
+                        ))
+                        new_df    = load_data()
+                        new_count = len(compute_badges(
+                            new_df[new_df['User'] == nickname]
+                        ))
+                        if new_count > old_count:
+                            st.toast("🎉 New badge unlocked!", icon="🏅")
                         st.rerun()
 
-    # ── MAP — always visible ───────────────────────────────────────────────
+    # ── MAP ───────────────────────────────────
     if not filtered.empty:
         latest = (
             filtered.sort_values(['Bakery Name', 'Date', 'Time'])
-            .groupby('Bakery Name')
-            .last()
-            .reset_index()
+            .groupby('Bakery Name').last().reset_index()
         )
     else:
         latest = pd.DataFrame()
 
     m = folium.Map(location=[55.6761, 12.5683], zoom_start=13, tiles="cartodbpositron")
 
-    for _, r in (latest.dropna(subset=['lat', 'lon']) if not latest.empty and 'lat' in latest.columns else pd.DataFrame()).iterrows():
+    for _, r in (latest.dropna(subset=['lat', 'lon'])
+                 if not latest.empty and 'lat' in latest.columns
+                 else pd.DataFrame()).iterrows():
         if r['lat'] == 0 and r['lon'] == 0:
             continue
         sold_out = r['Stock'] <= 0
         is_bv    = r['Bakery Name'] == best_value_bakery
-        color    = "red" if sold_out else ("green" if not is_bv else "darkgreen")
+        color    = "red" if sold_out else ("darkgreen" if is_bv else "green")
         icon_sym = "times" if sold_out else ("star" if is_bv else "shopping-basket")
         stock_txt = "🚫 Sold out" if sold_out else f"✅ {int(r['Stock'])} left"
 
-        # Avg wait from stats
         avg_wait_txt = ""
         if not stats_df.empty and r['Bakery Name'] in stats_df['Bakery Name'].values:
             bk_row = stats_df[stats_df['Bakery Name'] == r['Bakery Name']].iloc[0]
             avg_wait_txt = f"⏳ ~{int(bk_row['avg_wait'])} min avg wait<br>"
 
-        # Opening hours — reads today's day name, matches against sheet column
-        hours_txt = ""
-        day_name = get_now_dk().strftime("%A")  # e.g. "Monday"
         oh = str(r.get('Opening Hours', ''))
-        if oh and oh.lower() not in ('', 'nan', '0'):
-            hours_txt = f"🕐 {oh}<br>"
+        hours_txt = f"🕐 {esc(oh)}<br>" if oh and oh.lower() not in ('', 'nan', '0') else ""
 
-        # Google Maps directions link
-        directions_url = f"https://www.google.com/maps/dir/?api=1&destination={r['lat']},{r['lon']}"
+        # geo: URI lets iOS open Apple Maps, Android opens Google Maps
+        directions_url = f"geo:{r['lat']},{r['lon']}?q={r['lat']},{r['lon']}"
 
         popup_html = (
             f"<div style='font-family:sans-serif;font-size:13px;min-width:180px'>"
-            f"<b style='font-size:14px'>{r['Bakery Name']}</b><br>"
+            f"<b style='font-size:14px'>{esc(r['Bakery Name'])}</b><br>"
             f"{'<span style=\"color:#059669\">💚 Best Value</span><br>' if is_bv else ''}"
             f"{stock_txt}<br>"
-            f"🍩 {r['Fastelavnsbolle Type']}<br>"
+            f"🍩 {esc(r['Fastelavnsbolle Type'])}<br>"
             f"💰 {int(r['Price'])} kr &nbsp; ⭐ {float(r['Rating']):.1f}<br>"
-            f"{avg_wait_txt}"
-            f"{hours_txt}"
-            f"<a href='{directions_url}' target='_blank' "
+            f"{avg_wait_txt}{hours_txt}"
+            f"<a href='{directions_url}' "
             f"style='display:inline-block;margin-top:6px;background:#ff7e00;color:white;"
             f"padding:4px 10px;border-radius:8px;text-decoration:none;font-size:12px'>"
             f"🗺 Directions</a>"
@@ -547,31 +613,43 @@ with t_map:
             st.session_state.selected_bakery = clicked
             st.rerun()
 
-    if st.button("🔄 Refresh Data"):
-        st.cache_data.clear()
-        st.rerun()
+    col_ref, col_sug = st.columns([1, 1])
+    with col_ref:
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    with col_sug:
+        with st.popover("➕ Suggest a Bakery", use_container_width=True):
+            with st.form("suggest_bakery"):
+                sug_name    = st.text_input("Bakery name")
+                sug_address = st.text_input("Address")
+                sug_note    = st.text_area("Anything else we should know?", height=80)
+                if st.form_submit_button("Send Suggestion"):
+                    if sug_name.strip():
+                        post_to_sheets([
+                            sug_name, "", "", sug_address, 0, 0,
+                            get_now_dk().strftime("%Y-%m-%d"), "Suggestion",
+                            st.session_state.user_nickname, 0, 0, 0,
+                            get_now_dk().strftime("%H:%M"), "", sug_note, 0
+                        ])
+                        st.toast("Thanks! We'll look into adding them 🥐", icon="✅")
 
-    # ── Full panel (below map) — shows stats, wish list, and review form ────
+    # ── Full panel (below map) — stats, wish list, merchant form ──────────
     if st.session_state.selected_bakery:
         name = st.session_state.selected_bakery
         b_rows = df_raw[df_raw['Bakery Name'] == name]
         if not b_rows.empty:
-            b_data = b_rows.iloc[-1]
-            is_merchant  = st.session_state.merchant_bakery == name
-            is_best_value = (best_value_bakery == name)
-            on_wish_list = name in st.session_state.wish_list
+            b_data        = b_rows.iloc[-1]
+            is_merchant   = st.session_state.merchant_bakery == name
+            is_best_value = best_value_bakery == name
+            on_wish_list  = name in st.session_state.wish_list
 
             st.divider()
-
-            # Bakery headline + badges
             title_extra = ""
-            if is_best_value:
-                title_extra += ' <span class="badge badge-best">💚 Best Value</span>'
-            if is_merchant:
-                title_extra += ' <span class="badge">🧑‍🍳 YOUR SHOP</span>'
-            st.markdown(f"#### 📍 {name} {title_extra}", unsafe_allow_html=True)
+            if is_best_value: title_extra += ' <span class="badge badge-best">💚 Best Value</span>'
+            if is_merchant:   title_extra += ' <span class="badge">🧑‍🍳 YOUR SHOP</span>'
+            st.markdown(f"#### 📍 {esc(name)} {title_extra}", unsafe_allow_html=True)
 
-            # Stat cards
             if not stats_df.empty and name in stats_df['Bakery Name'].values:
                 bk = stats_df[stats_df['Bakery Name'] == name].iloc[0]
                 st.markdown(f"""
@@ -583,7 +661,6 @@ with t_map:
                 </div>
                 """, unsafe_allow_html=True)
 
-            # Wish list toggle
             wl_label = "💛 Remove from Wish List" if on_wish_list else "🤍 Add to Wish List"
             if st.button(wl_label, key="wl_toggle"):
                 if on_wish_list:
@@ -594,10 +671,9 @@ with t_map:
 
             st.divider()
 
-            # ── MERCHANT FORM ──────────────────
             if is_merchant:
                 st.subheader("🧑‍🍳 Update Your Shop")
-                with st.form("merchant_update"):
+                with st.form("merchant_update_map"):
                     new_stock  = st.number_input("Current Stock", 0, 1000, int(b_data['Stock']))
                     new_flavor = st.text_input("Today's Featured Flavor", value=str(b_data['Fastelavnsbolle Type']))
                     new_price  = st.number_input("Price (DKK)", 0, 200, int(b_data['Price']))
@@ -613,10 +689,6 @@ with t_map:
                         st.toast("📡 Broadcast sent!", icon="✅")
                         st.rerun()
 
-            # ── REVIEW FORM now rendered above the map in the action strip ──
-            elif b_data['Stock'] > 0:
-                pass  # form is handled in the strip above
-
 # ══════════════════════════════════════════════
 # TAB: STREAM
 # ══════════════════════════════════════════════
@@ -624,7 +696,7 @@ with t_stream:
     st.subheader("🧵 Live Feed")
 
     if st.session_state.user_filter:
-        st.info(f"Showing posts by **@{st.session_state.user_filter}**")
+        st.info(f"Showing posts by **@{esc(st.session_state.user_filter)}**")
         if st.button("✖ Clear Filter"):
             st.session_state.user_filter = None
             st.rerun()
@@ -633,35 +705,50 @@ with t_stream:
         s_df = df_raw[df_raw['Category'].isin(['User', 'Merchant'])].sort_values(
             by=["Date", "Time"], ascending=False
         )
+        # User filter applies only to user posts; merchant updates always show unless
+        # the filter is set — in which case hide merchant posts too for clarity
         if st.session_state.user_filter:
-            s_df = s_df[s_df['User'] == st.session_state.user_filter]
+            s_df = s_df[
+                (s_df['Category'] == 'User') &
+                (s_df['User'] == st.session_state.user_filter)
+            ]
 
         if s_df.empty:
-            st.info("No user reviews yet — be the first!")
+            st.info("No reviews yet — be the first!")
         else:
             for _, r in s_df.iterrows():
-                is_bv = (r['Bakery Name'] == best_value_bakery)
-                bv_tag = '<span class="badge badge-best">💚 Best Value</span>' if is_bv else ''
-                photo_url = str(r.get('Photo URL', ''))
-                is_merchant = r['Category'] == 'Merchant'
+                is_bv      = r['Bakery Name'] == best_value_bakery
+                bv_tag     = '<span class="badge badge-best">💚 Best Value</span>' if is_bv else ''
+                photo_url  = str(r.get('Photo URL', ''))
+                is_merch   = r['Category'] == 'Merchant'
 
-                if is_merchant:
+                if is_merch:
                     st.markdown(f"""
                     <div class="review-card" style="border-color:#ffb347;background:#fff8f2;">
-                      <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; 🧑‍🍳 <b>Merchant Update</b> &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
-                      <div>🍩 {r['Fastelavnsbolle Type']} &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr &nbsp;|&nbsp; 📦 {int(float(r['Stock']))} in stock</div>
-                      {'<div class="comment">📣 ' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
+                      <div class="meta">📍 <b>{esc(r['Bakery Name'])}</b> {bv_tag} &nbsp;·&nbsp;
+                           🧑‍🍳 <b>Merchant Update</b> &nbsp;·&nbsp; {esc(r['Date'])} {esc(r['Time'])}</div>
+                      <div>🍩 {esc(r['Fastelavnsbolle Type'])} &nbsp;|&nbsp;
+                           💰 {int(float(r['Price']))} kr &nbsp;|&nbsp;
+                           📦 {int(float(r['Stock']))} in stock</div>
+                      {'<div class="comment">📣 ' + esc(r['Comment']) + '</div>' if r['Comment'] else ''}
                     </div>
                     """, unsafe_allow_html=True)
                 else:
+                    share_js = share_text(r['Bakery Name'], float(r['Rating']))
                     st.markdown(f"""
                     <div class="review-card">
-                      <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; 👤 @{r['User']} &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
+                      <div class="meta">📍 <b>{esc(r['Bakery Name'])}</b> {bv_tag} &nbsp;·&nbsp;
+                           👤 @{esc(r['User'])} &nbsp;·&nbsp; {esc(r['Date'])} {esc(r['Time'])}</div>
                       <div class="stars">{stars(float(r['Rating']))} &nbsp; <b>{float(r['Rating']):.1f}</b>
                            &nbsp;|&nbsp; ⏳ {int(float(r.get('Wait Time', 0)))} min wait
                            &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr</div>
-                      <div>🍩 {r['Fastelavnsbolle Type']}</div>
-                      {'<div class="comment">' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
+                      <div>🍩 {esc(r['Fastelavnsbolle Type'])}</div>
+                      {'<div class="comment">' + esc(r['Comment']) + '</div>' if r['Comment'] else ''}
+                      <div style="margin-top:8px">
+                        <button onclick="navigator.clipboard.writeText('{share_js}').then(()=>alert('Copied!'))"
+                          style="background:none;border:1px solid #ffb347;color:#b84a00;padding:3px 10px;
+                                 border-radius:8px;font-size:0.78rem;cursor:pointer">📤 Share</button>
+                      </div>
                     </div>
                     """, unsafe_allow_html=True)
                     if photo_url.startswith('http'):
@@ -670,83 +757,77 @@ with t_stream:
         st.info("No data yet.")
 
 # ══════════════════════════════════════════════
-# TAB: RANKINGS / LEADERBOARD
+# TAB: RANKINGS
 # ══════════════════════════════════════════════
 with t_top:
     st.subheader("🏆 Rankings")
 
     if not stats_df.empty:
-        # ── Best Value Award ──────────────────
         if best_value_bakery:
             bv_row = stats_df[stats_df['Bakery Name'] == best_value_bakery].iloc[0]
             st.markdown(f"""
-            <div style="background:linear-gradient(135deg,#d4f7e0,#a8f0c8);border-radius:16px;padding:20px;margin-bottom:20px;border:2px solid #38f9d7;">
+            <div style="background:linear-gradient(135deg,#d4f7e0,#a8f0c8);border-radius:16px;
+                        padding:20px;margin-bottom:20px;border:2px solid #38f9d7;">
               <div style="font-family:'Syne',sans-serif;font-size:1.3rem;color:#064e3b">💚 Best Value Bakery Award</div>
-              <div style="font-size:1.6rem;font-weight:800;color:#065f46;margin:6px 0">{best_value_bakery}</div>
-              <div style="color:#047857">⭐ {bv_row['avg_rating']:.2f} rating &nbsp;·&nbsp; 💰 {int(bv_row['avg_price'])} kr avg &nbsp;·&nbsp; {int(bv_row['review_count'])} reviews</div>
+              <div style="font-size:1.6rem;font-weight:800;color:#065f46;margin:6px 0">{esc(best_value_bakery)}</div>
+              <div style="color:#047857">⭐ {bv_row['avg_rating']:.2f} rating &nbsp;·&nbsp;
+                   💰 {int(bv_row['avg_price'])} kr avg &nbsp;·&nbsp; {int(bv_row['review_count'])} reviews</div>
             </div>
             """, unsafe_allow_html=True)
 
-        # ── Bakery Rankings ───────────────────
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**🥐 Bakeries by Rating**")
             for _, row in stats_df.head(10).iterrows():
                 is_bv = row['Bakery Name'] == best_value_bakery
-                bv = " 💚" if is_bv else ""
                 st.markdown(
-                    f"**{row['Bakery Name']}**{bv} — {stars(row['avg_rating'])} "
-                    f"({row['avg_rating']:.1f}, {int(row['review_count'])} reviews)"
+                    f"**{esc(row['Bakery Name'])}**{'💚' if is_bv else ''} — "
+                    f"{stars(row['avg_rating'])} ({row['avg_rating']:.1f}, {int(row['review_count'])} reviews)"
                 )
-
             st.markdown("---")
             st.markdown("**🍩 Top Flavors**")
             flavor_df = (
                 df_raw[df_raw['Rating'] > 0]
                 .groupby('Fastelavnsbolle Type')['Rating']
-                .agg(['mean', 'count'])
-                .sort_values('mean', ascending=False)
-                .reset_index()
+                .agg(['mean', 'count']).sort_values('mean', ascending=False).reset_index()
             )
             for _, row in flavor_df.head(8).iterrows():
                 st.markdown(
-                    f"**{row['Fastelavnsbolle Type']}** — {stars(row['mean'])} "
-                    f"({row['mean']:.1f}, {int(row['count'])} reviews)"
+                    f"**{esc(row['Fastelavnsbolle Type'])}** — "
+                    f"{stars(row['mean'])} ({row['mean']:.1f}, {int(row['count'])} reviews)"
                 )
 
         with c2:
             st.markdown("**💰 Best Value Scores**")
             for _, row in stats_df.sort_values('value_score', ascending=False).head(8).iterrows():
                 st.markdown(
-                    f"**{row['Bakery Name']}** — score {row['value_score']:.2f} "
+                    f"**{esc(row['Bakery Name'])}** — score {row['value_score']:.2f} "
                     f"(⭐{row['avg_rating']:.1f} / {int(row['avg_price'])}kr)"
                 )
 
-        # ── Top Hunters — full width below so expanding reviews don't push Best Value off screen ──
         st.divider()
         st.markdown("**👑 Top Hunters**")
         u_counts = (
             df_raw[df_raw['Category'] == 'User']['User']
-            .value_counts()
-            .reset_index()
+            .value_counts().reset_index()
         )
         u_counts.columns = ['User', 'count']
         for i, row in u_counts.head(10).iterrows():
-            user_revs = df_raw[df_raw['User'] == row['User']]
+            user_revs   = df_raw[df_raw['User'] == row['User']]
             badges_html = "".join(compute_badges(user_revs))
             col_a, col_b = st.columns([5, 1])
             col_a.markdown(
-                f"**@{row['User']}** — {int(row['count'])} reviews<br>{badges_html}",
+                f"**@{esc(row['User'])}** — {int(row['count'])} reviews<br>{badges_html}",
                 unsafe_allow_html=True
             )
             if col_b.button("View", key=f"u_{i}"):
                 st.session_state.user_filter = row['User']
                 st.rerun()
 
-    # ── Inline user reviews, shown when View is clicked ───────────────────
+    # Inline reviews when View is clicked
     if st.session_state.user_filter and not df_raw.empty:
         st.divider()
-        st.markdown(f"#### 👤 Reviews by @{st.session_state.user_filter}")
+        st.markdown(f"#### 👤 Reviews by @{esc(st.session_state.user_filter)}")
         if st.button("✖ Clear", key="rankings_clear_filter"):
             st.session_state.user_filter = None
             st.rerun()
@@ -758,22 +839,23 @@ with t_top:
             st.info("No reviews yet.")
         else:
             for _, r in user_df.iterrows():
-                is_bv = (r['Bakery Name'] == best_value_bakery)
-                bv_tag = '<span class="badge badge-best">💚 Best Value</span>' if is_bv else ''
+                is_bv    = r['Bakery Name'] == best_value_bakery
+                bv_tag   = '<span class="badge badge-best">💚 Best Value</span>' if is_bv else ''
                 photo_url = str(r.get('Photo URL', ''))
                 st.markdown(f"""
                 <div class="review-card">
-                  <div class="meta">📍 <b>{r['Bakery Name']}</b> {bv_tag} &nbsp;·&nbsp; {r['Date']} {r['Time']}</div>
+                  <div class="meta">📍 <b>{esc(r['Bakery Name'])}</b> {bv_tag}
+                       &nbsp;·&nbsp; {esc(r['Date'])} {esc(r['Time'])}</div>
                   <div class="stars">{stars(float(r['Rating']))} &nbsp; <b>{float(r['Rating']):.1f}</b>
                        &nbsp;|&nbsp; ⏳ {int(float(r.get('Wait Time', 0)))} min wait
                        &nbsp;|&nbsp; 💰 {int(float(r['Price']))} kr</div>
-                  <div>🍩 {r['Fastelavnsbolle Type']}</div>
-                  {'<div class="comment">' + str(r['Comment']) + '</div>' if r['Comment'] else ''}
+                  <div>🍩 {esc(r['Fastelavnsbolle Type'])}</div>
+                  {'<div class="comment">' + esc(r['Comment']) + '</div>' if r['Comment'] else ''}
                 </div>
                 """, unsafe_allow_html=True)
                 if photo_url.startswith('http'):
                     st.image(photo_url, use_container_width=True)
-    else:
+    elif stats_df.empty:
         st.info("No reviews yet. Start hunting!")
 
 # ══════════════════════════════════════════════
@@ -781,24 +863,21 @@ with t_top:
 # ══════════════════════════════════════════════
 with t_wishlist:
     st.subheader("💛 Your Wish List")
-    st.caption("Bakeries you want to visit — tap the heart icon on the map to add them.")
+    st.caption("Tap 🤍 Add to Wish List on any bakery to save it here.")
 
     if not st.session_state.wish_list:
-        st.info("Your wish list is empty. Tap **🤍 Add to Wish List** on any bakery on the map!")
+        st.info("Your wish list is empty. Tap a pin on the map and hit 🤍 Add to Wish List!")
     else:
         for bname in st.session_state.wish_list:
             with st.container(border=True):
                 col_n, col_r, col_x = st.columns([4, 2, 1])
-                col_n.markdown(f"**{bname}**")
-
-                # Show latest stock status
+                col_n.markdown(f"**{esc(bname)}**")
                 if not df_raw.empty:
                     b_rows = df_raw[df_raw['Bakery Name'] == bname]
                     if not b_rows.empty:
-                        last = b_rows.iloc[-1]
+                        last   = b_rows.iloc[-1]
                         status = "🟢 In Stock" if last['Stock'] > 0 else "🔴 Sold Out"
                         col_r.markdown(status)
-
                 if col_x.button("✖", key=f"wl_rm_{bname}"):
                     st.session_state.wish_list.remove(bname)
                     st.rerun()
@@ -809,13 +888,20 @@ with t_wishlist:
 with t_settings:
     st.subheader("⚙️ Settings")
 
-    st.session_state.user_nickname = st.text_input(
-        "Your Hunter Nickname 🎯", st.session_state.user_nickname
+    new_nick = st.text_input(
+        "Your Hunter Nickname 🎯",
+        value=st.session_state.user_nickname,
+        placeholder="e.g. CreamPuffCarla"
     )
+    if new_nick != st.session_state.user_nickname:
+        st.session_state.user_nickname = new_nick
+        components.html(
+            f"<script>localStorage.setItem('bq_nickname','{html.escape(new_nick)}');</script>",
+            height=0
+        )
 
-    # Show user's own badges
     if not df_raw.empty:
-        my_revs = df_raw[df_raw['User'] == st.session_state.user_nickname]
+        my_revs   = df_raw[df_raw['User'] == st.session_state.user_nickname]
         my_badges = compute_badges(my_revs)
         if my_badges:
             st.markdown("**Your Badges:**")
@@ -825,9 +911,10 @@ with t_settings:
 
     st.divider()
     st.markdown("**🧑‍🍳 Merchant Access**")
+
     if st.session_state.merchant_bakery:
         name = st.session_state.merchant_bakery
-        st.success(f"✅ Logged in as: **{name}**")
+        st.success(f"✅ Logged in as: **{esc(name)}**")
 
         b_rows = df_raw[df_raw['Bakery Name'] == name]
         if not b_rows.empty:
@@ -837,14 +924,15 @@ with t_settings:
                 new_stock  = st.number_input("Current Stock", 0, 1000, int(b_data['Stock']))
                 new_flavor = st.text_input("Today's Featured Flavor", value=str(b_data['Fastelavnsbolle Type']))
                 new_price  = st.number_input("Price (DKK)", 0, 200, int(b_data['Price']))
-                new_hours  = st.text_input("Opening Hours", value=str(b_data.get('Opening Hours', '')))
+                new_hours  = st.text_input("Opening Hours (e.g. Mon–Fri 7–18, Sat 8–15)",
+                                           value=str(b_data.get('Opening Hours', '')))
                 m_comm     = st.text_area("Merchant Note (e.g. 'Next batch at 2pm!')", value="")
                 if st.form_submit_button("📡 Broadcast Update", use_container_width=True, type="primary"):
                     row = [name, new_flavor, "", str(b_data['Address']),
                            float(b_data['lat']), float(b_data['lon']),
                            get_now_dk().strftime("%Y-%m-%d"), "Merchant", name,
                            5.0, new_price, new_stock,
-                           get_now_dk().strftime("%H:%M"), "", m_comm, 0]
+                           get_now_dk().strftime("%H:%M"), new_hours, m_comm, 0]
                     post_to_sheets(row)
                     st.cache_data.clear()
                     st.toast("📡 Broadcast sent!", icon="✅")
@@ -856,8 +944,9 @@ with t_settings:
     else:
         k_in = st.text_input("Bakery Secret Key", type="password")
         if st.button("🔑 Unlock Merchant Tools"):
-            if not df_raw.empty:
-                match = df_raw[df_raw['Bakery Key'].astype(str) == k_in]
+            if not df_raw.empty and k_in:
+                hashed = hash_key(k_in)
+                match  = df_raw[df_raw['Bakery Key'] == hashed]
                 if not match.empty:
                     st.session_state.merchant_bakery = match['Bakery Name'].iloc[0]
                     st.rerun()
@@ -872,19 +961,22 @@ with t_help:
 ### 🥐 How to use BolleQuest
 
 **Finding bolles**
-- Green pins = in stock, Red pins = sold out, **Dark green ★ = Best Value bakery**
-- Use the 🎛️ Filters panel to narrow by rating, price, or search by name/flavor
-- Tap any pin to see stock, average rating, and wait times
+- Green pins = in stock · Red = sold out · Dark green ★ = Best Value bakery
+- Use 🎛️ Filters to narrow by rating, price, or search by name/flavor
+- Tap any pin to see the popup, then scroll down for stats and review options
 
 **Reviewing**
-- Tap a green pin → choose **Join the Queue** (we time your wait) or **Fast Review**
-- Add a photo straight from your phone camera
+- Tap a pin → **Join the Queue** (we time your wait) or **Fast Review** (already eaten?)
+- Add a photo from your phone camera
 - Your review updates the live feed and rankings instantly
 
-**Wish List**
-- Tap 🤍 on any bakery to save it to your Wish List tab for later
+**Sharing**
+- Tap 📤 Share on any review card to copy a shareable message to your clipboard
 
-**Badges you can earn** 🏅
+**Wish List**
+- Tap 🤍 Add to Wish List on any bakery to track it for later
+
+**Badges** 🏅
 | Badge | How |
 |---|---|
 | 🥐 First Bite | Submit your first review |
@@ -898,6 +990,9 @@ with t_help:
 **Best Value Award 💚**
 Awarded to the bakery with the highest rating-to-price ratio. Updated live.
 
-**For bakeries**
-Enter your secret key in ⚙️ Settings to unlock merchant tools and broadcast stock updates.
+**Add to Home Screen 📱**
+On iPhone: tap Share ↑ → "Add to Home Screen". On Android: tap ⋮ → "Add to Home Screen".
+
+**For bakeries 🧑‍🍳**
+Enter your secret key in ⚙️ Settings to update stock, price, flavor and opening hours.
     """)
